@@ -245,9 +245,10 @@ func (c *Connection) cancelIncomingRequest(id MessageID) {
 }
 
 func (c *Connection) Close() {
+	// TODO: cancel all pending requests
 }
 
-func (c *Connection) SendRequest(ctx context.Context, method string, params []any) (any, any, error) {
+func (c *Connection) SendRequest(ctx context.Context, method string, params []any) (reqResult any, reqError any, err error) {
 	id := MessageID(c.lastOutRequestsIndex.Add(1))
 
 	c.loggerMutex.Lock()
