@@ -183,7 +183,7 @@ func (c *Connection) handleIncomingRequest(id MessageID, method string, params [
 		c.logger.LogOutgoingResponse(id, method, reqResult, reqError)
 		c.loggerMutex.Unlock()
 
-		if err := c.send([]any{messageTypeResponse, id, reqError, reqResult}); err != nil {
+		if err := c.send(messageTypeResponse, id, reqError, reqResult); err != nil {
 			c.errorHandler(fmt.Errorf("error sending response: %w", err))
 			c.Close()
 		}
@@ -264,7 +264,7 @@ func (c *Connection) SendRequest(ctx context.Context, method string, params []an
 	}
 	c.activeOutRequestsMutex.Unlock()
 
-	if err := c.send([]any{messageTypeRequest, id, method, params}); err != nil {
+	if err := c.send(messageTypeRequest, id, method, params); err != nil {
 		c.activeOutRequestsMutex.Lock()
 		delete(c.activeOutRequests, id)
 		c.activeOutRequestsMutex.Unlock()
@@ -305,13 +305,13 @@ func (c *Connection) SendNotification(method string, params []any) error {
 	c.logger.LogOutgoingNotification(method, params)
 	c.loggerMutex.Unlock()
 
-	if err := c.send([]any{messageTypeNotification, method, params}); err != nil {
+	if err := c.send(messageTypeNotification, method, params); err != nil {
 		return fmt.Errorf("sending notification: %w", err)
 	}
 	return nil
 }
 
-func (c *Connection) send(data []any) error {
+func (c *Connection) send(data ...any) error {
 	start := time.Now()
 
 	buff, err := msgpack.Marshal(data)
