@@ -1,26 +1,42 @@
 package main
 
 import (
-	"fmt"
+	"log/slog"
+	"net"
 
-	"github.com/vmihailenco/msgpack/v5"
+	"github.com/bcmi-labs/arduino-iot-cloud-data-pipeline/pkg/config"
+	"github.com/arduino/bridge/msgpackrouter"
 )
 
 func main() {
-	type Item struct {
-		Foo string
+	// Server configuration
+	type Config struct {
+		LogLevel   slog.Level `default:"debug"`
+		ListenAddr string     `default:":8900"`
 	}
-
-	b, err := msgpack.Marshal(&Item{Foo: "bar"})
+	var cfg Config
+	err := config.New().WithParser(config.EnvParser()).Parse(&cfg)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(len(b), b)
 
-	var item Item
-	err = msgpack.Unmarshal(b, &item)
+	// Open listening socket
+	l, err := net.Listen("tcp", cfg.ListenAddr)
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println(item.Foo)
+	slog.Info("Listening for RPC services", "addr", cfg.ListenAddr)
+	defer l.Close()
+
+	router := msgpackrouter.New()
+	for {
+		conn, err := l.Accept()
+		if err != nil {
+			slog.Error("Failed to accept connection", "err", err)
+			continue
+		}
+
+		slog.Info("Accepted connection", "addr", conn.RemoteAddr())
+		router.Accept(conn)
+	}
 }
