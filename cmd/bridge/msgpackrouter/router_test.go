@@ -98,21 +98,21 @@ func TestBasicRouterFunctionality(t *testing.T) {
 	}
 	{
 		// Call from client2 the registered method on client1
-		result, reqErr, err := cl2.SendRequest(context.Background(), "ping", []any{"1", int16(2), true})
-		require.Equal(t, []any{"1", int16(2), true}, result)
+		result, reqErr, err := cl2.SendRequest(context.Background(), "ping", []any{"1", 2, true})
+		require.Equal(t, []any{"1", int8(2), true}, result)
 		require.Nil(t, reqErr)
 		require.NoError(t, err)
 	}
 	{
 		// Self-call from client1
-		result, reqErr, err := cl1.SendRequest(context.Background(), "ping", []any{"c", int16(12), false})
-		require.Equal(t, []any{"c", int16(12), false}, result)
+		result, reqErr, err := cl1.SendRequest(context.Background(), "ping", []any{"c", 12, false})
+		require.Equal(t, []any{"c", int8(12), false}, result)
 		require.Nil(t, reqErr)
 		require.NoError(t, err)
 	}
 	{
 		// Call from client2 an un-registered method
-		result, reqErr, err := cl2.SendRequest(context.Background(), "not-existent-method", []any{"1", int16(2), true})
+		result, reqErr, err := cl2.SendRequest(context.Background(), "not-existent-method", []any{"1", 2, true})
 		require.Nil(t, result)
 		require.Equal(t, "method not-existent-method not available", reqErr)
 		require.NoError(t, err)

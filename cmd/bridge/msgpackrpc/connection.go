@@ -11,18 +11,19 @@ import (
 	"github.com/vmihailenco/msgpack/v5"
 )
 
-type MessageID uint32
+type MessageID uint
 
 const (
-	messageTypeRequest      int8 = 0
-	messageTypeResponse     int8 = 1
-	messageTypeNotification int8 = 2
+	messageTypeRequest      = 0
+	messageTypeResponse     = 1
+	messageTypeNotification = 2
 )
 
 // Connection is a MessagePack-RPC connection
 type Connection struct {
 	in                  io.ReadCloser
 	out                 io.WriteCloser
+	outEncoder          *msgpack.Encoder
 	outMutex            sync.Mutex
 	errorHandler        func(error)
 	requestHandler      RequestHandler
@@ -60,9 +61,12 @@ type NotificationHandler func(logger FunctionLogger, method string, params []any
 
 // NewConnection starts a new
 func NewConnection(in io.ReadCloser, out io.WriteCloser, requestHandler RequestHandler, notificationHandler NotificationHandler, errorHandler func(error)) *Connection {
+	outEncoder := msgpack.NewEncoder(out)
+	outEncoder.UseCompactInts(true)
 	conn := &Connection{
 		in:                  in,
 		out:                 out,
+		outEncoder:          outEncoder,
 		requestHandler:      requestHandler,
 		notificationHandler: notificationHandler,
 		errorHandler:        errorHandler,
@@ -109,9 +113,9 @@ func (c *Connection) processIncomingMessage(data []any) error {
 		return fmt.Errorf("invalid packet, expected array with at least 3 elements")
 	}
 
-	msgType, ok := data[0].(int8)
+	msgType, ok := ToInt(data[0])
 	if !ok {
-		return fmt.Errorf("invalid packet, expected int32 as first element, got %T", data[0])
+		return fmt.Errorf("invalid packet, expected int as first element, got %T", data[0])
 	}
 
 	switch msgType {
@@ -119,8 +123,8 @@ func (c *Connection) processIncomingMessage(data []any) error {
 		if len(data) != 4 {
 			return fmt.Errorf("invalid request, expected array with 4 elements")
 		}
-		if id, ok := data[1].(uint32); !ok {
-			return fmt.Errorf("invalid request, expected msgid (uint32) as second element")
+		if id, ok := ToUint(data[1]); !ok {
+			return fmt.Errorf("invalid request, expected msgid (uint) as second element")
 		} else if method, ok := data[2].(string); !ok {
 			return fmt.Errorf("invalid request, expected method (string) as third element")
 		} else if params, ok := data[3].([]any); !ok {
@@ -133,8 +137,8 @@ func (c *Connection) processIncomingMessage(data []any) error {
 		if len(data) != 4 {
 			return fmt.Errorf("invalid response, expected array with 4 elements")
 		}
-		if id, ok := data[1].(uint32); !ok {
-			return fmt.Errorf("invalid response, expected msgid (uint32) as second element")
+		if id, ok := ToUint(data[1]); !ok {
+			return fmt.Errorf("invalid response, expected msgid (uint) as second element")
 		} else {
 			reqError := data[2]
 			reqResult := data[3]
@@ -197,9 +201,9 @@ func (c *Connection) handleIncomingNotification(method string, params []any) {
 			c.errorHandler(fmt.Errorf("invalid cancelRequest, expected array with 1 element"))
 			return
 		}
-		id, ok := params[0].(uint32)
+		id, ok := ToUint(params[0])
 		if !ok {
-			c.errorHandler(fmt.Errorf("invalid cancelRequest, expected msgid (int) as first element"))
+			c.errorHandler(fmt.Errorf("invalid cancelRequest, expected msgid (uint) as first element"))
 			return
 		}
 		c.cancelIncomingRequest(MessageID(id))
@@ -314,13 +318,8 @@ func (c *Connection) SendNotification(method string, params []any) error {
 func (c *Connection) send(data ...any) error {
 	start := time.Now()
 
-	buff, err := msgpack.Marshal(data)
-	if err != nil {
-		return err
-	}
-
 	c.outMutex.Lock()
-	_, err = c.out.Write(buff)
+	err := c.outEncoder.Encode(data)
 	c.outMutex.Unlock()
 	if err != nil {
 		return err

@@ -12,14 +12,13 @@ import (
 	"github.com/djherbis/nio/v3"
 	"github.com/stretchr/testify/require"
 	"github.com/vmihailenco/msgpack/v5"
-	"go.bug.st/f"
 )
 
 func TestRPCConnection(t *testing.T) {
 	in, testdataIn := nio.Pipe(buffer.New(1024))
 	testdataOut, out := nio.Pipe(buffer.New(1024))
 	d := msgpack.NewDecoder(testdataOut)
-
+	d.UseLooseInterfaceDecoding(true)
 	type CustomError struct {
 		Code    int
 		Message string
@@ -65,8 +64,10 @@ func TestRPCConnection(t *testing.T) {
 	})
 	go conn.Run()
 
+	enc := msgpack.NewEncoder(testdataIn)
+	enc.UseCompactInts(true)
 	send := func(msg ...any) {
-		testdataIn.Write(f.Must(msgpack.Marshal(msg)))
+		require.NoError(t, enc.Encode(msg))
 	}
 	sendCancel := func(id MessageID) {
 		send(messageTypeNotification, "$/cancelRequest", []any{id})
@@ -86,7 +87,7 @@ func TestRPCConnection(t *testing.T) {
 		require.Equal(t, "REQ method=textDocument/didOpen params=[]", request)
 		msg, err := d.DecodeSlice()
 		require.NoError(t, err)
-		require.Equal(t, []any{int8(1), uint32(1), nil, []any{}}, msg)
+		require.Equal(t, []any{int64(1), int64(1), nil, []any{}}, msg)
 	}
 
 	{ // Test another incoming request
@@ -96,7 +97,7 @@ func TestRPCConnection(t *testing.T) {
 		require.Equal(t, "REQ method=textDocument/didClose params=[]", request)
 		msg, err := d.DecodeSlice()
 		require.NoError(t, err)
-		require.Equal(t, []any{int8(1), uint32(2), nil, []any{}}, msg)
+		require.Equal(t, []any{int64(1), int64(2), nil, []any{}}, msg)
 	}
 
 	{ // Test incoming request cancelation
@@ -108,7 +109,7 @@ func TestRPCConnection(t *testing.T) {
 		require.Equal(t, "REQ method=tocancel params=[] canceled", request)
 		msg, err := d.DecodeSlice()
 		require.NoError(t, err)
-		require.Equal(t, []any{int8(1), uint32(3), map[string]any{"Code": int8(1), "Message": "error message"}, nil}, msg)
+		require.Equal(t, []any{int64(1), int64(3), map[string]any{"Code": int64(1), "Message": "error message"}, nil}, msg)
 	}
 
 	{ // Test outgoing request
@@ -118,18 +119,18 @@ func TestRPCConnection(t *testing.T) {
 			respRes, respErr, err := conn.SendRequest(t.Context(), "helloworld", []any{true})
 			require.NoError(t, err)
 			require.Nil(t, respErr)
-			require.Equal(t, map[string]any{"fakedata": uint32(999)}, respRes)
+			require.Equal(t, map[string]any{"fakedata": int8(99)}, respRes)
 		}()
 		msg, err := d.DecodeSlice() // Grab the SendRequest
 		require.NoError(t, err)
-		require.Equal(t, []any{int8(0), uint32(1), "helloworld", []any{true}}, msg)
-		send(messageTypeResponse, MessageID(1), nil, map[string]any{"fakedata": uint32(999)})
+		require.Equal(t, []any{int64(0), int64(1), "helloworld", []any{true}}, msg)
+		send(messageTypeResponse, 1, nil, map[string]any{"fakedata": 99})
 		wg.Wait()
 	}
 
 	{ // Test invalid response
 		wg.Add(1)
-		send(int8(1), MessageID(999), 10, nil)
+		send(1, 999, 10, nil)
 		wg.Wait()
 		require.Equal(t, "error=invalid ID in request response '999': double answer or request not sent", requestError)
 	}
