@@ -34,8 +34,9 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 		func(ctx context.Context, _ msgpackrpc.FunctionLogger, method string, params []any) (_result any, _err any) {
 			// This handler is called when a request is received from the client
 
-			// Check if the client is trying to register a new method
-			if method == "$/register" {
+			switch method {
+			case "$/register":
+				// Check if the client is trying to register a new method
 				if len(params) != 1 {
 					return nil, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params))
 				} else if methodToRegister, ok := params[0].(string); !ok {
@@ -43,6 +44,14 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 				} else if err := r.registerMethod(methodToRegister, msgpackconn); err != nil {
 					return nil, err.Error()
 				} else {
+					return nil, nil
+				}
+			case "$/reset":
+				// Check if the client is trying to remove its registered methods
+				if len(params) != 0 {
+					return nil, "invalid params: no params are expected"
+				} else {
+					r.removeMethodsFromConnection(msgpackconn)
 					return nil, nil
 				}
 			}
