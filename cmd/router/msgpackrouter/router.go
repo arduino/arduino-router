@@ -8,7 +8,7 @@ import (
 	"maps"
 	"sync"
 
-	"github.com/arduino/bridge/msgpackrpc"
+	"github.com/arduino/router/msgpackrpc"
 )
 
 type Router struct {

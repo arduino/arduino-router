@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/arduino/bridge/msgpackrpc"
+	"github.com/arduino/router/msgpackrpc"
 )
 
 func main() {

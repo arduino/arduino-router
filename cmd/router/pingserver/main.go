@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/bcmi-labs/arduino-iot-cloud-data-pipeline/pkg/config"
-	"github.com/arduino/bridge/msgpackrpc"
+	"github.com/arduino/router/msgpackrpc"
 )
 
 func main() {

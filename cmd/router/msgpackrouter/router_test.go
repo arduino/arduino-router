@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/arduino/bridge/msgpackrouter"
-	"github.com/arduino/bridge/msgpackrpc"
+	"github.com/arduino/router/msgpackrouter"
+	"github.com/arduino/router/msgpackrpc"
 	"github.com/djherbis/buffer"
 	"github.com/djherbis/nio/v3"
 	"github.com/stretchr/testify/require"

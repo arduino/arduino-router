@@ -5,7 +5,7 @@ import (
 	"net"
 
 	"github.com/bcmi-labs/arduino-iot-cloud-data-pipeline/pkg/config"
-	"github.com/arduino/bridge/msgpackrouter"
+	"github.com/arduino/router/msgpackrouter"
 	"go.bug.st/serial"
 )
 
