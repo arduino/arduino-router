@@ -5,6 +5,7 @@ import (
 	"net"
 
 	"github.com/arduino/router/msgpackrouter"
+
 	"github.com/spf13/cobra"
 	"go.bug.st/serial"
 )
