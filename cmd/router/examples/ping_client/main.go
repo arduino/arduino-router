@@ -15,24 +15,20 @@ func main() {
 	}
 
 	conn := msgpackrpc.NewConnection(c, c,
-		// Server
 		func(ctx context.Context, logger msgpackrpc.FunctionLogger, method string, params []any) (result any, err any) {
-			if method == "ping" {
-				return params[0], nil
-			}
 			return nil, "method not implemented: " + method
 		},
 		func(logger msgpackrpc.FunctionLogger, method string, params []any) {
-
+			// ignore notifications
 		},
 		func(err error) {
-			fmt.Println("Error:", err)
+			// ignore errors
 		})
 	defer conn.Close()
 	go conn.Run()
 
 	// Client
-	reqResult, reqError, err := conn.SendRequest(context.Background(), "mult", []any{3.0, 5.0})
+	reqResult, reqError, err := conn.SendRequest(context.Background(), "ping", []any{"HELLO", 1, true, 5.0})
 	if err != nil {
 		panic(err)
 	}
