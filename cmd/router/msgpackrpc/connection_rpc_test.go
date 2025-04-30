@@ -51,7 +51,6 @@ func TestRPCConnection(t *testing.T) {
 		},
 		func(e error) {
 			defer wg.Done()
-			t.Log(e)
 			if e == io.EOF {
 				return
 			}
