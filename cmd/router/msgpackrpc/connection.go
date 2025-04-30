@@ -25,7 +25,7 @@ type Connection struct {
 	out                 io.WriteCloser
 	outEncoder          *msgpack.Encoder
 	outMutex            sync.Mutex
-	errorHandler        func(error)
+	errorHandler        ErrorHandler
 	requestHandler      RequestHandler
 	notificationHandler NotificationHandler
 	logger              Logger
@@ -59,8 +59,13 @@ type RequestHandler func(ctx context.Context, logger FunctionLogger, method stri
 // NotificationHandler handles notifications from a MessagePack-RPC Connection.
 type NotificationHandler func(logger FunctionLogger, method string, params []any)
 
+// ErrorHandler handles errors from a MessagePack-RPC Connection.
+// It is called when an error occurs while reading from the connection or when
+// sending a request or notification.
+type ErrorHandler func(error)
+
 // NewConnection starts a new
-func NewConnection(in io.ReadCloser, out io.WriteCloser, requestHandler RequestHandler, notificationHandler NotificationHandler, errorHandler func(error)) *Connection {
+func NewConnection(in io.ReadCloser, out io.WriteCloser, requestHandler RequestHandler, notificationHandler NotificationHandler, errorHandler ErrorHandler) *Connection {
 	outEncoder := msgpack.NewEncoder(out)
 	outEncoder.UseCompactInts(true)
 	conn := &Connection{
