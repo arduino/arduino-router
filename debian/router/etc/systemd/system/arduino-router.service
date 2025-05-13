@@ -1,0 +1,12 @@
+[Unit]
+Description=Arduino Router Service
+
+[Service]
+ExecStart=/usr/bin/router --listen-port :8900 --serial-port /dev/ttyACM0
+StandardOutput=journal
+StandardError=journal
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
