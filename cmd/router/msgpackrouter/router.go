@@ -2,6 +2,7 @@ package msgpackrouter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -11,19 +12,47 @@ import (
 	"github.com/arduino/router/msgpackrpc"
 )
 
+type RouterRequestHandler func(ctx context.Context, params []any) (result any, err any)
+
 type Router struct {
-	routesLock sync.Mutex
-	routes     map[string]*msgpackrpc.Connection
+	routesLock     sync.Mutex
+	routes         map[string]*msgpackrpc.Connection
+	routesInternal map[string]RouterRequestHandler
 }
 
 func New() Router {
 	return Router{
-		routes: make(map[string]*msgpackrpc.Connection),
+		routes:         make(map[string]*msgpackrpc.Connection),
+		routesInternal: make(map[string]RouterRequestHandler),
 	}
 }
 
-func (r *Router) Accept(conn io.ReadWriteCloser) {
-	go r.connectionLoop(conn)
+func routerError(code int, msg string) []any {
+	return []any{code, msg}
+}
+
+func (r *Router) Accept(conn io.ReadWriteCloser) <-chan struct{} {
+	res := make(chan struct{})
+	go func() {
+		r.connectionLoop(conn)
+		close(res)
+	}()
+	return res
+}
+
+func (r *Router) RegisterMethod(method string, handler RouterRequestHandler) error {
+	r.routesLock.Lock()
+	defer r.routesLock.Unlock()
+
+	if _, ok := r.routesInternal[method]; ok {
+		slog.Error("Route already exists", "method", method)
+		return fmt.Errorf("route already exists: %s", method)
+	}
+
+	// Register the method with the handler
+	r.routesInternal[method] = handler
+	slog.Info("Registered internal method", "method", method)
+	return nil
 }
 
 func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
@@ -42,35 +71,41 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			case "$/register":
 				// Check if the client is trying to register a new method
 				if len(params) != 1 {
-					return nil, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params))
+					return nil, routerError(1, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params)))
 				} else if methodToRegister, ok := params[0].(string); !ok {
-					return nil, fmt.Sprintf("invalid params: expected string, got %T", params[0])
+					return nil, routerError(1, fmt.Sprintf("invalid params: expected string, got %T", params[0]))
 				} else if err := r.registerMethod(methodToRegister, msgpackconn); err != nil {
-					return nil, err.Error()
+					return nil, routerError(1, err.Error())
 				} else {
-					return nil, nil
+					return true, nil
 				}
 			case "$/reset":
 				// Check if the client is trying to remove its registered methods
 				if len(params) != 0 {
-					return nil, "invalid params: no params are expected"
+					return nil, routerError(1, "invalid params: no params are expected")
 				} else {
 					r.removeMethodsFromConnection(msgpackconn)
-					return nil, nil
+					return true, nil
 				}
+			}
+
+			// Check if the method is an internal method
+			if handler, ok := r.routesInternal[method]; ok {
+				// Call the internal method handler
+				return handler(ctx, params)
 			}
 
 			// Check if the method is registered
 			client, ok := r.getConnectionForMethod(method)
 			if !ok {
-				return nil, fmt.Sprintf("method %s not available", method)
+				return nil, routerError(2, fmt.Sprintf("method %s not available", method))
 			}
 
 			// Forward the call to the registered client
 			reqResult, reqError, err := client.SendRequest(ctx, method, params)
 			if err != nil {
 				slog.Error("Failed to send request", "method", method, "err", err)
-				return nil, fmt.Sprintf("failed to send request: %s", err)
+				return nil, routerError(3, fmt.Sprintf("failed to send request: %s", err))
 			}
 
 			// Send the response back to the original caller
@@ -94,6 +129,10 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			}
 		},
 		func(err error) {
+			if errors.Is(err, io.EOF) {
+				slog.Info("Connection closed by peer")
+				return
+			}
 			slog.Error("Error in connection", "err", err)
 		},
 	)

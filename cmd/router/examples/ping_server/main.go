@@ -28,12 +28,8 @@ func main() {
 			}
 			return nil, "method not found: " + method
 		},
-		func(_ msgpackrpc.FunctionLogger, method string, params []any) {
-			slog.Info("Received notification", "method", method, "params", params)
-		},
-		func(err error) {
-			slog.Error("Error", "err", err)
-		},
+		nil,
+		nil,
 	)
 	defer conn.Close()
 	go conn.Run()

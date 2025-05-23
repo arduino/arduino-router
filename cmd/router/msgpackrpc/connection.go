@@ -68,6 +68,21 @@ type ErrorHandler func(error)
 func NewConnection(in io.ReadCloser, out io.WriteCloser, requestHandler RequestHandler, notificationHandler NotificationHandler, errorHandler ErrorHandler) *Connection {
 	outEncoder := msgpack.NewEncoder(out)
 	outEncoder.UseCompactInts(true)
+	if requestHandler == nil {
+		requestHandler = func(ctx context.Context, logger FunctionLogger, method string, params []any) (result any, err any) {
+			return nil, fmt.Errorf("method not implemented: %s", method)
+		}
+	}
+	if notificationHandler == nil {
+		notificationHandler = func(logger FunctionLogger, method string, params []any) {
+			// ignore notifications
+		}
+	}
+	if errorHandler == nil {
+		errorHandler = func(err error) {
+			// ignore errors
+		}
+	}
 	conn := &Connection{
 		in:                  in,
 		out:                 out,

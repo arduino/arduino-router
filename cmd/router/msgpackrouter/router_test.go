@@ -84,7 +84,7 @@ func TestBasicRouterFunctionality(t *testing.T) {
 	{
 		// Register a method on the first client
 		result, reqErr, err := cl1.SendRequest(context.Background(), "$/register", []any{"ping"})
-		require.Nil(t, result)
+		require.Equal(t, true, result)
 		require.Nil(t, reqErr)
 		require.NoError(t, err)
 	}
@@ -92,13 +92,13 @@ func TestBasicRouterFunctionality(t *testing.T) {
 		// Try to re-register the same method
 		result, reqErr, err := cl1.SendRequest(context.Background(), "$/register", []any{"ping"})
 		require.Nil(t, result)
-		require.Equal(t, "route already exists: ping", reqErr)
+		require.Equal(t, []any{int8(1), "route already exists: ping"}, reqErr)
 		require.NoError(t, err)
 	}
 	{
 		// Register a method on the second client
 		result, reqErr, err := cl2.SendRequest(context.Background(), "$/register", []any{"temperature"})
-		require.Nil(t, result)
+		require.Equal(t, true, result)
 		require.Nil(t, reqErr)
 		require.NoError(t, err)
 	}
@@ -120,7 +120,7 @@ func TestBasicRouterFunctionality(t *testing.T) {
 		// Call from client2 an un-registered method
 		result, reqErr, err := cl2.SendRequest(context.Background(), "not-existent-method", []any{"1", 2, true})
 		require.Nil(t, result)
-		require.Equal(t, "method not-existent-method not available", reqErr)
+		require.Equal(t, []any{int8(2), "method not-existent-method not available"}, reqErr)
 		require.NoError(t, err)
 	}
 	{

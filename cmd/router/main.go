@@ -1,14 +1,18 @@
 package main
 
 import (
+	"context"
 	"encoding/hex"
 	"io"
 	"log/slog"
 	"net"
+	"sync"
+	"time"
 
 	"github.com/arduino/router/msgpackrouter"
 
 	"github.com/spf13/cobra"
+	"go.bug.st/f"
 	"go.bug.st/serial"
 )
 
@@ -78,18 +82,91 @@ func startRouter(cfg Config) {
 
 	// Open serial port if specified
 	if cfg.SerialPortAddr != "" {
-		serialPort, err := serial.Open(cfg.SerialPortAddr, &serial.Mode{
-			BaudRate: 115200,
-			DataBits: 8,
-			StopBits: serial.OneStopBit,
-			Parity:   serial.NoParity,
+		var serialLock sync.Mutex
+		var serialOpened = sync.NewCond(&serialLock)
+		var serialClosed = sync.NewCond(&serialLock)
+		var serialCloseSignal = make(chan struct{})
+		err := router.RegisterMethod("$/serial/open", func(ctx context.Context, params []any) (result any, err any) {
+			if len(params) != 1 {
+				return nil, []any{1, "Invalid number of parameters"}
+			}
+			address, ok := params[0].(string)
+			if !ok {
+				return nil, []any{1, "Invalid parameter type"}
+			}
+			slog.Info("Request for opening serial port", "serial", address)
+			if address != cfg.SerialPortAddr {
+				return nil, []any{1, "Invalid serial port address"}
+			}
+			serialOpened.L.Lock()
+			if serialCloseSignal == nil { // check if already opened
+				serialCloseSignal = make(chan struct{})
+				serialOpened.Broadcast()
+			}
+			serialOpened.L.Unlock()
+			return true, nil
 		})
-		if err != nil {
-			panic(err)
-		}
-		slog.Info("Opened serial connection", "serial", cfg.SerialPortAddr)
-		wr := &DebugStream{upstream: serialPort}
-		router.Accept(wr)
+		f.Assert(err == nil, "Failed to register $/serial/open method")
+		err = router.RegisterMethod("$/serial/close", func(ctx context.Context, params []any) (result any, err any) {
+			if len(params) != 1 {
+				return nil, []any{1, "Invalid number of parameters"}
+			}
+			address, ok := params[0].(string)
+			if !ok {
+				return nil, []any{1, "Invalid parameter type"}
+			}
+			slog.Info("Request for closing serial port", "serial", address)
+			if address != cfg.SerialPortAddr {
+				return nil, []any{1, "Invalid serial port address"}
+			}
+			serialClosed.L.Lock()
+			if serialCloseSignal != nil { // check if already closed
+				close(serialCloseSignal)
+				serialCloseSignal = nil
+				serialClosed.Wait()
+			}
+			serialClosed.L.Unlock()
+			return true, nil
+		})
+		f.Assert(err == nil, "Failed to register $/serial/close method")
+		go func() {
+			for {
+				serialOpened.L.Lock()
+				for serialCloseSignal == nil {
+					serialClosed.Broadcast()
+					serialOpened.Wait()
+				}
+				close := serialCloseSignal
+				serialOpened.L.Unlock()
+
+				slog.Info("Opening serial connection", "serial", cfg.SerialPortAddr)
+				serialPort, err := serial.Open(cfg.SerialPortAddr, &serial.Mode{
+					BaudRate: 115200,
+					DataBits: 8,
+					StopBits: serial.OneStopBit,
+					Parity:   serial.NoParity,
+				})
+				if err != nil {
+					slog.Error("Failed to open serial port. Retrying in 5 seconds...", "serial", cfg.SerialPortAddr, "err", err)
+					time.Sleep(5 * time.Second)
+					continue
+				}
+				slog.Info("Opened serial connection", "serial", cfg.SerialPortAddr)
+				wr := &DebugStream{upstream: serialPort}
+
+				// wait for the close command from RPC or for a failure of the serial port (routerExit)
+				routerExit := router.Accept(wr)
+				select {
+				case <-routerExit:
+					slog.Info("Serial port failed connection")
+				case <-close:
+				}
+
+				// in any case, wait for the router to drop the connection
+				serialPort.Close()
+				<-routerExit
+			}
+		}()
 	}
 
 	// Wait for incoming connections

@@ -14,16 +14,7 @@ func main() {
 		panic(err)
 	}
 
-	conn := msgpackrpc.NewConnection(c, c,
-		func(ctx context.Context, logger msgpackrpc.FunctionLogger, method string, params []any) (result any, err any) {
-			return nil, "method not implemented: " + method
-		},
-		func(logger msgpackrpc.FunctionLogger, method string, params []any) {
-			// ignore notifications
-		},
-		func(err error) {
-			// ignore errors
-		})
+	conn := msgpackrpc.NewConnection(c, c, nil, nil, nil)
 	defer conn.Close()
 	go conn.Run()
 

@@ -14,8 +14,8 @@ The protocol supported is defined here https://github.com/msgpack-rpc/msgpack-rp
 - RESPONSE: this message is an array of 4 elements containing in order:
   1. `type`: Fixed as number `1` (to identify the message as a RESPONSE).
   2. `msgid`: A message ID.
-  3. `error`: The error returned from the method, or `nil` if the method was successful.
-  4. `result`: The result of the method. It should be `nil` if an error occurred.
+  3. `error`: The error returned from the method, or `null` if the method was successful.
+  4. `result`: The result of the method. It should be `null` if an error occurred.
 
 - NOTIFICATION: this message is an array of 3 elements containing in order:
   1. `type`: Fixed number `2` (to identify this message as a NOTIFICATION).
@@ -45,8 +45,8 @@ The Router implements a single `$/register` method that is used by a client to r
 | Client P <-> Router                                                 |
 | ------------------------------------------------------------------- |
 | `[REQUEST, 50, "$/register", ["ping"]]` >>                          |
-| Method successfully registered:<br> `[RESPONSE, 50, null, null]` << |
-| Error:<br> `[RESPONSE, 50, null, "route already exists: ping"]` <<  |
+| Method successfully registered:<br> `[RESPONSE, 50, null, true]` << |
+| Error:<br> `[RESPONSE, 50, "route already exists: ping", null]` <<  |
 
 After the method is registered another client may perform an RPC request to that method, the Router will take care to forward the messages back and forth. A typical RPC call example may be:
 
@@ -63,15 +63,31 @@ Note that the request ID has been remapped by the Router: it keeps track of all 
 
 A request to a non-registered method will result in an error:
 
-| Client A <-> Router                                                                                        |
-| ---------------------------------------------------------------------------------------------------------- |
-| Client A does an RPC call to the Router<br>`[REQUEST, 33, "xxxx", [1, true]]` >>                           |
-| The Router didn't know how to handle the request<br> `[RESPONSE, 33, "method xxxx not available", nil]` << |
+| Client A <-> Router                                                                                         |
+| ----------------------------------------------------------------------------------------------------------- |
+| Client A does an RPC call to the Router<br>`[REQUEST, 33, "xxxx", [1, true]]` >>                            |
+| The Router didn't know how to handle the request<br> `[RESPONSE, 33, "method xxxx not available", null]` << |
 
-## Unregistering methods (via `$/reset` method call)
+### Unregistering methods (via `$/reset` method call)
 
 A client can drop all its registered methods by calling the `$/reset` method, with an empty parameter list.
 
-## Unregistering methods (via client disconnection)
+| Client A <-> Router                                                                   |
+| ------------------------------------------------------------------------------------- |
+| Clian A request to remove all registered methods<br>`[REQUEST, 52, "$/reset", []]` >> |
+| The Router should always succeed<br> `[RESPONSE, 52, null, true]` <<                  |
+
+### Unregistering methods (via client disconnection)
 
 When a client disconnects all the registered methods from that client are dropped.
+
+### Router serial connection
+
+The MsgPack RPC Router can establish a physical connection with a serial port. This connection can register and call RPC methods as any other network TCP/IP connection. The serial port address is specified via the command line flag `-p PORT`, if this flag is set the Router will try to open the serial port at startup.
+
+If the serial port fails for some reason, the router will retry to connect automatically after 5 seconds.
+
+The Router has a RPC methods to "open" and "close" the serial connection on request:
+
+- The `$/serial/open` method will open the serial port connection. This method returns immediately.
+- The `$/serial/close` method will close the serial port connection. This method returns only after the port has been successfully disconnected.
