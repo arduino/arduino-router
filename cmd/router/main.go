@@ -8,7 +8,9 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/arduino/router/msgpackrouter"
@@ -210,6 +212,11 @@ func startRouter(cfg Config) error {
 		}()
 	}
 
-	// Sleep forever
-	select {}
+	// Sleep forever until interrupted
+	signalChan := make(chan os.Signal, 1)
+	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
+	<-signalChan
+
+	// Handle graceful shutdown via defers
+	return nil
 }
