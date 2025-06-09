@@ -12,7 +12,7 @@ import (
 	"github.com/arduino/router/msgpackrpc"
 )
 
-type RouterRequestHandler func(ctx context.Context, params []any) (result any, err any)
+type RouterRequestHandler func(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (result any, err any)
 
 type Router struct {
 	routesLock     sync.Mutex
@@ -20,8 +20,8 @@ type Router struct {
 	routesInternal map[string]RouterRequestHandler
 }
 
-func New() Router {
-	return Router{
+func New() *Router {
+	return &Router{
 		routes:         make(map[string]*msgpackrpc.Connection),
 		routesInternal: make(map[string]RouterRequestHandler),
 	}
@@ -92,7 +92,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			// Check if the method is an internal method
 			if handler, ok := r.routesInternal[method]; ok {
 				// Call the internal method handler
-				return handler(ctx, params)
+				return handler(ctx, msgpackconn, params)
 			}
 
 			// Check if the method is registered
