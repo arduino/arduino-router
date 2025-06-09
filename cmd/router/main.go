@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/arduino/router/msgpackrouter"
+	"github.com/arduino/router/msgpackrpc"
+	networkapi "github.com/arduino/router/network-api"
 
 	"github.com/arduino/go-paths-helper"
 	"github.com/spf13/cobra"
@@ -107,13 +109,16 @@ func startRouter(cfg Config) error {
 	// Run router
 	router := msgpackrouter.New()
 
+	// Register TCP network API methods
+	networkapi.Register(router)
+
 	// Open serial port if specified
 	if cfg.SerialPortAddr != "" {
 		var serialLock sync.Mutex
 		var serialOpened = sync.NewCond(&serialLock)
 		var serialClosed = sync.NewCond(&serialLock)
 		var serialCloseSignal = make(chan struct{})
-		err := router.RegisterMethod("$/serial/open", func(ctx context.Context, params []any) (result any, err any) {
+		err := router.RegisterMethod("$/serial/open", func(ctx context.Context, _ *msgpackrpc.Connection, params []any) (result any, err any) {
 			if len(params) != 1 {
 				return nil, []any{1, "Invalid number of parameters"}
 			}
@@ -134,7 +139,7 @@ func startRouter(cfg Config) error {
 			return true, nil
 		})
 		f.Assert(err == nil, "Failed to register $/serial/open method")
-		err = router.RegisterMethod("$/serial/close", func(ctx context.Context, params []any) (result any, err any) {
+		err = router.RegisterMethod("$/serial/close", func(ctx context.Context, _ *msgpackrpc.Connection, params []any) (result any, err any) {
 			if len(params) != 1 {
 				return nil, []any{1, "Invalid number of parameters"}
 			}
