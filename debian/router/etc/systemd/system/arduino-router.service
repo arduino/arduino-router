@@ -5,7 +5,7 @@ Wants=network-online.target
 Requires=
 
 [Service]
-ExecStart=/usr/bin/router --listen-port :8900 --unix-port /run/arduino-router.socket --serial-port /dev/ttyHS1
+ExecStart=/usr/bin/router --listen-port :8900 --unix-port /var/run/arduino-router.socket --serial-port /dev/ttyHS1
 StandardOutput=journal
 StandardError=journal
 Restart=always

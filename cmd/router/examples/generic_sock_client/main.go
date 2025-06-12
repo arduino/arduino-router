@@ -18,7 +18,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	c, err := net.Dial("unix", paths.TempDir().Join("msgpack-router.sock").String())
+	c, err := net.Dial("unix", paths.TempDir().Join("arduino-router.sock").String())
 	if err != nil {
 		fmt.Println("Error connecting to server:", err)
 		os.Exit(1)

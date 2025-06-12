@@ -17,7 +17,6 @@ import (
 	"github.com/arduino/router/msgpackrpc"
 	networkapi "github.com/arduino/router/network-api"
 
-	"github.com/arduino/go-paths-helper"
 	"github.com/spf13/cobra"
 	"go.bug.st/f"
 	"go.bug.st/serial"
@@ -51,8 +50,7 @@ func main() {
 	}
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
 	cmd.Flags().StringVarP(&cfg.ListenTCPAddr, "listen-port", "l", ":8900", "Listening port for RPC services")
-	defaultUnixAddr := paths.TempDir().Join("msgpack-router.sock").String()
-	cmd.Flags().StringVarP(&cfg.ListenUnixAddr, "unix-port", "u", defaultUnixAddr, "Listening port for RPC services")
+	cmd.Flags().StringVarP(&cfg.ListenUnixAddr, "unix-port", "u", "/var/run/arduino-router.sock", "Listening port for RPC services")
 	cmd.Flags().StringVarP(&cfg.SerialPortAddr, "serial-port", "p", "", "Serial port address")
 	if err := cmd.Execute(); err != nil {
 		slog.Error("Error executing command.", "error", err)
