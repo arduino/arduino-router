@@ -1,5 +1,8 @@
 #!/bin/sh
 
-systemctl daemon-reload
 systemctl enable arduino-router
-systemctl start arduino-router
+
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload
+  systemctl start arduino-router
+fi
