@@ -5,6 +5,10 @@ Wants=network-online.target
 Requires=
 
 [Service]
+# We want to make sure the micro is enable and ready before starting the router
+ExecStartPre=-/usr/bin/gpioset -c /dev/gpiochip1 -t0 71=0
+ExecStartPre=-/usr/bin/gpioset -c /dev/gpiochip1 -t0 40=0
+ExecStartPre=-/usr/bin/gpioset -c /dev/gpiochip1 -t0 40=1
 ExecStart=/usr/bin/router --listen-port :8900 --unix-port /var/run/arduino-router.socket --serial-port /dev/ttyHS1
 StandardOutput=journal
 StandardError=journal
