@@ -113,7 +113,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 		},
 		func(_ msgpackrpc.FunctionLogger, method string, params []any) {
 			// This handler is called when a notification is received from the client
-			slog.Info("Received notification", "method", method, "params", params)
+			slog.Debug("Received notification", "method", method, "params", params)
 
 			// Check if the method is registered
 			client, ok := r.getConnectionForMethod(method)
