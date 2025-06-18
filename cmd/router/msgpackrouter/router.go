@@ -27,10 +27,6 @@ func New() *Router {
 	}
 }
 
-func routerError(code int, msg string) []any {
-	return []any{code, msg}
-}
-
 func (r *Router) Accept(conn io.ReadWriteCloser) <-chan struct{} {
 	res := make(chan struct{})
 	go func() {
@@ -46,7 +42,7 @@ func (r *Router) RegisterMethod(method string, handler RouterRequestHandler) err
 
 	if _, ok := r.routesInternal[method]; ok {
 		slog.Error("Route already exists", "method", method)
-		return fmt.Errorf("route already exists: %s", method)
+		return newRouteAlreadyExistsError(method)
 	}
 
 	// Register the method with the handler
@@ -71,18 +67,21 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			case "$/register":
 				// Check if the client is trying to register a new method
 				if len(params) != 1 {
-					return nil, routerError(1, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params)))
+					return nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params)))
 				} else if methodToRegister, ok := params[0].(string); !ok {
-					return nil, routerError(1, fmt.Sprintf("invalid params: expected string, got %T", params[0]))
+					return nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: expected string, got %T", params[0]))
 				} else if err := r.registerMethod(methodToRegister, msgpackconn); err != nil {
-					return nil, routerError(1, err.Error())
+					if rae, ok := err.(*RouteError); ok {
+						return nil, rae.ToEncodedError()
+					}
+					return nil, routerError(ErrCodeGenericError, err.Error())
 				} else {
 					return true, nil
 				}
 			case "$/reset":
 				// Check if the client is trying to remove its registered methods
 				if len(params) != 0 {
-					return nil, routerError(1, "invalid params: no params are expected")
+					return nil, routerError(ErrCodeInvalidParams, "invalid params: no params are expected")
 				} else {
 					r.removeMethodsFromConnection(msgpackconn)
 					return true, nil
@@ -98,14 +97,14 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			// Check if the method is registered
 			client, ok := r.getConnectionForMethod(method)
 			if !ok {
-				return nil, routerError(2, fmt.Sprintf("method %s not available", method))
+				return nil, routerError(ErrCodeMethodNotAvailable, fmt.Sprintf("method %s not available", method))
 			}
 
 			// Forward the call to the registered client
 			reqResult, reqError, err := client.SendRequest(ctx, method, params)
 			if err != nil {
 				slog.Error("Failed to send request", "method", method, "err", err)
-				return nil, routerError(3, fmt.Sprintf("failed to send request: %s", err))
+				return nil, routerError(ErrCodeFailedToSendRequests, fmt.Sprintf("failed to send request: %s", err))
 			}
 
 			// Send the response back to the original caller
@@ -150,7 +149,7 @@ func (r *Router) registerMethod(method string, conn *msgpackrpc.Connection) erro
 	defer r.routesLock.Unlock()
 
 	if _, ok := r.routes[method]; ok {
-		return fmt.Errorf("route already exists: %s", method)
+		return newRouteAlreadyExistsError(method)
 	}
 	r.routes[method] = conn
 	return nil
