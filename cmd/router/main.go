@@ -98,7 +98,6 @@ func startRouter(cfg Config) error {
 		} else {
 			slog.Info("Listening on TCP socket", "listen_addr", cfg.ListenTCPAddr)
 			listeners = append(listeners, l)
-			defer l.Close()
 		}
 	}
 
@@ -109,7 +108,6 @@ func startRouter(cfg Config) error {
 		} else {
 			slog.Info("Listening on Unix socket", "listen_addr", cfg.ListenUnixAddr)
 			listeners = append(listeners, l)
-			defer l.Close()
 		}
 	}
 
@@ -215,7 +213,7 @@ func startRouter(cfg Config) error {
 				conn, err := l.Accept()
 				if err != nil {
 					slog.Error("Failed to accept connection", "err", err)
-					continue
+					break
 				}
 
 				slog.Info("Accepted connection", "addr", conn.RemoteAddr())
@@ -229,6 +227,13 @@ func startRouter(cfg Config) error {
 	signal.Notify(signalChan, os.Interrupt, syscall.SIGTERM)
 	<-signalChan
 
-	// Handle graceful shutdown via defers
+	// Perform graceful shutdown
+	for _, l := range listeners {
+		slog.Info("Closing listener", "addr", l.Addr())
+		if err := l.Close(); err != nil {
+			slog.Error("Failed to close listener", "err", err)
+		}
+	}
+
 	return nil
 }
