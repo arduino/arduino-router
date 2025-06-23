@@ -134,3 +134,57 @@ func TestRPCConnection(t *testing.T) {
 		require.Equal(t, "error=invalid ID in request response '999': double answer or request not sent", requestError)
 	}
 }
+
+func TestRPCRougeDoubleCallWithSameID(t *testing.T) {
+	in, testdataIn := nio.Pipe(buffer.New(1024))
+	testdataOut, out := nio.Pipe(buffer.New(1024))
+
+	enc := msgpack.NewEncoder(testdataIn)
+	enc.UseCompactInts(true)
+	send := func(msg ...any) {
+		require.NoError(t, enc.Encode(msg))
+	}
+
+	d := msgpack.NewDecoder(testdataOut)
+	d.UseLooseInterfaceDecoding(true)
+	var reqLock sync.Mutex
+	request := ""
+	requestError := ""
+	var wg sync.WaitGroup
+	conn := NewConnection(
+		in, out,
+		func(ctx context.Context, logger FunctionLogger, method string, params []any) (_result any, _err any) {
+			defer wg.Done()
+			reqLock.Lock()
+			request += fmt.Sprintf("REQ method=%v params=%v\n", method, params)
+			reqLock.Unlock()
+			time.Sleep(500 * time.Millisecond) // Simulate a long request
+			return params[0], nil
+		},
+		nil,
+		func(e error) {
+			if e == io.EOF {
+				return
+			}
+			reqLock.Lock()
+			requestError = fmt.Sprintf("error=%s", e)
+			reqLock.Unlock()
+		},
+	)
+	go conn.Run()
+	t.Cleanup(conn.Close)
+
+	wg.Add(2)
+	send(messageTypeRequest, MessageID(1), "test", []any{1})
+	time.Sleep(100 * time.Millisecond)
+	send(messageTypeRequest, MessageID(1), "test", []any{2})
+	wg.Wait()
+	require.Equal(t, "REQ method=test params=[1]\nREQ method=test params=[2]\n", request)
+	require.Equal(t, "error=RPC protocol violation: request with ID 1 already active, canceling it", requestError)
+
+	time.Sleep(100 * time.Millisecond)
+	res, err := d.DecodeInterface()
+	require.NoError(t, err)
+	// Expect answer from the second request only
+	require.Equal(t, []any{int64(1), int64(1), nil, int64(2)}, res)
+}
