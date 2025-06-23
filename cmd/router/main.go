@@ -57,29 +57,38 @@ func main() {
 	}
 }
 
-type DebugStream struct {
-	upstream io.ReadWriteCloser
+type MsgpackDebugStream struct {
+	Upstream io.ReadWriteCloser
+	Name     string
 }
 
-func (d *DebugStream) Read(p []byte) (n int, err error) {
-	n, err = d.upstream.Read(p)
-	slog.Debug("Read from stream", "data", hex.EncodeToString(p[:n]), "err", err)
+func (d *MsgpackDebugStream) Read(p []byte) (n int, err error) {
+	n, err = d.Upstream.Read(p)
+	if err != nil {
+		slog.Debug("Read error from "+d.Name, "err", err)
+	} else {
+		slog.Debug("Read from "+d.Name, "data", hex.EncodeToString(p[:n]))
+	}
 	return n, err
 }
 
-func (d *DebugStream) Write(p []byte) (n int, err error) {
-	n, err = d.upstream.Write(p)
-	slog.Debug("Write to stream", "data", hex.EncodeToString(p[:n]), "err", err)
+func (d *MsgpackDebugStream) Write(p []byte) (n int, err error) {
+	n, err = d.Upstream.Write(p)
+	if err != nil {
+		slog.Debug("Write error to "+d.Name, "err", err)
+	} else {
+		slog.Debug("Write to  "+d.Name, "data", hex.EncodeToString(p[:n]))
+	}
 	return n, err
 }
 
-func (d *DebugStream) Close() error {
-	err := d.upstream.Close()
-	slog.Debug("Closed stream", "err", err)
-	return err
+func (d *MsgpackDebugStream) Close() error {
+	return d.Upstream.Close()
 }
 
 func startRouter(cfg Config) error {
+	slog.SetLogLoggerLevel(cfg.LogLevel)
+
 	var listeners []net.Listener
 
 	// Open listening TCP socket
@@ -182,7 +191,7 @@ func startRouter(cfg Config) error {
 					continue
 				}
 				slog.Info("Opened serial connection", "serial", cfg.SerialPortAddr)
-				wr := &DebugStream{upstream: serialPort}
+				wr := &MsgpackDebugStream{Name: cfg.SerialPortAddr, Upstream: serialPort}
 
 				// wait for the close command from RPC or for a failure of the serial port (routerExit)
 				routerExit := router.Accept(wr)
