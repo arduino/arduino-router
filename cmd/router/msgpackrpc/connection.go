@@ -184,11 +184,16 @@ func (c *Connection) processIncomingMessage(data []any) error {
 
 func (c *Connection) handleIncomingRequest(id MessageID, method string, params []any) {
 	ctx, cancel := context.WithCancel(context.Background())
+	req := &inRequest{cancel: cancel}
 
 	c.activeInRequestsMutex.Lock()
-	c.activeInRequests[id] = &inRequest{
-		cancel: cancel,
+	if overriddenReq := c.activeInRequests[id]; overriddenReq != nil {
+		// RPC protocol violation: there is already an active request with the same ID.
+		// Cancel the existing request and replace it with the new one
+		overriddenReq.cancel()
+		c.errorHandler(fmt.Errorf("RPC protocol violation: request with ID %v already active, canceling it", id))
 	}
+	c.activeInRequests[id] = req
 	c.activeInRequestsMutex.Unlock()
 
 	c.loggerMutex.Lock()
@@ -198,10 +203,17 @@ func (c *Connection) handleIncomingRequest(id MessageID, method string, params [
 	go func() {
 		reqResult, reqError := c.requestHandler(ctx, logger, method, params)
 
+		var existing *inRequest
 		c.activeInRequestsMutex.Lock()
-		c.activeInRequests[id].cancel()
-		delete(c.activeInRequests, id)
+		existing = c.activeInRequests[id]
+		if existing == req {
+			existing.cancel()
+			delete(c.activeInRequests, id)
+		}
 		c.activeInRequestsMutex.Unlock()
+		if existing != req {
+			return
+		}
 
 		c.loggerMutex.Lock()
 		c.logger.LogOutgoingResponse(id, method, reqResult, reqError)
