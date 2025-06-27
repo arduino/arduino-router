@@ -1,7 +1,3 @@
 #!/bin/sh
 
 systemctl disable arduino-router
-
-if [ -d /run/systemd/system ]; then
-  systemctl stop arduino-router
-fi
