@@ -1,6 +1,7 @@
 package main
 
 import (
+	"cmp"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -41,6 +42,9 @@ func main() {
 				cfg.LogLevel = slog.LevelDebug
 			} else {
 				cfg.LogLevel = slog.LevelInfo
+			}
+			if !cmd.Flags().Changed("unix-port") {
+				cfg.ListenUnixAddr = cmp.Or(os.Getenv("ARDUINO_ROUTER_SOCKET"), cfg.ListenUnixAddr)
 			}
 			if err := startRouter(cfg); err != nil {
 				slog.Error("Failed to start router", "err", err)
