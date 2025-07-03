@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/arduino/router/monitorapi"
 	"github.com/arduino/router/msgpackrouter"
 	"github.com/arduino/router/msgpackrpc"
 	networkapi "github.com/arduino/router/network-api"
@@ -25,10 +26,11 @@ import (
 
 // Server configuration
 type Config struct {
-	LogLevel       slog.Level
-	ListenTCPAddr  string
-	ListenUnixAddr string
-	SerialPortAddr string
+	LogLevel        slog.Level
+	ListenTCPAddr   string
+	ListenUnixAddr  string
+	SerialPortAddr  string
+	MonitorPortAddr string
 }
 
 func main() {
@@ -56,6 +58,7 @@ func main() {
 	cmd.Flags().StringVarP(&cfg.ListenTCPAddr, "listen-port", "l", ":8900", "Listening port for RPC services")
 	cmd.Flags().StringVarP(&cfg.ListenUnixAddr, "unix-port", "u", "/var/run/arduino-router.sock", "Listening port for RPC services")
 	cmd.Flags().StringVarP(&cfg.SerialPortAddr, "serial-port", "p", "", "Serial port address")
+	cmd.Flags().StringVarP(&cfg.MonitorPortAddr, "monitor-port", "m", "127.0.0.1:7500", "Listening port for MCU monitor proxy")
 	if err := cmd.Execute(); err != nil {
 		slog.Error("Error executing command.", "error", err)
 	}
@@ -107,6 +110,7 @@ func startRouter(cfg Config) error {
 
 	// Open listening UNIX socket
 	if cfg.ListenUnixAddr != "" {
+		_ = os.Remove(cfg.ListenUnixAddr) // Remove the socket file if it exists
 		if l, err := net.Listen("unix", cfg.ListenUnixAddr); err != nil {
 			return fmt.Errorf("failed to listen on UNIX socket %s: %w", cfg.ListenUnixAddr, err)
 		} else {
@@ -120,6 +124,11 @@ func startRouter(cfg Config) error {
 
 	// Register TCP network API methods
 	networkapi.Register(router)
+
+	// Register monitor API methods
+	if err := monitorapi.Register(router, cfg.MonitorPortAddr); err != nil {
+		slog.Error("Failed to register monitor API", "err", err)
+	}
 
 	// Open serial port if specified
 	if cfg.SerialPortAddr != "" {
