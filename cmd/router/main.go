@@ -33,6 +33,7 @@ type Config struct {
 	ListenTCPAddr   string
 	ListenUnixAddr  string
 	SerialPortAddr  string
+	SerialBaudRate  int
 	MonitorPortAddr string
 }
 
@@ -67,6 +68,7 @@ func main() {
 	cmd.Flags().StringVarP(&cfg.ListenTCPAddr, "listen-port", "l", ":8900", "Listening port for RPC services")
 	cmd.Flags().StringVarP(&cfg.ListenUnixAddr, "unix-port", "u", "/var/run/arduino-router.sock", "Listening port for RPC services")
 	cmd.Flags().StringVarP(&cfg.SerialPortAddr, "serial-port", "p", "", "Serial port address")
+	cmd.Flags().IntVarP(&cfg.SerialBaudRate, "serial-baudrate", "b", 115200, "Serial port baud rate")
 	cmd.Flags().StringVarP(&cfg.MonitorPortAddr, "monitor-port", "m", "127.0.0.1:7500", "Listening port for MCU monitor proxy")
 	if err := cmd.Execute(); err != nil {
 		slog.Error("Error executing command.", "error", err)
@@ -200,7 +202,7 @@ func startRouter(cfg Config) error {
 
 				slog.Info("Opening serial connection", "serial", cfg.SerialPortAddr)
 				serialPort, err := serial.Open(cfg.SerialPortAddr, &serial.Mode{
-					BaudRate: 115200,
+					BaudRate: cfg.SerialBaudRate,
 					DataBits: 8,
 					StopBits: serial.OneStopBit,
 					Parity:   serial.NoParity,
