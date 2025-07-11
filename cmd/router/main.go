@@ -24,6 +24,9 @@ import (
 	"go.bug.st/serial"
 )
 
+// Version will be set a build time with -ldflags
+var Version string = "0.0.0-dev"
+
 // Server configuration
 type Config struct {
 	LogLevel        slog.Level
@@ -36,10 +39,15 @@ type Config struct {
 func main() {
 	var cfg Config
 	var verbose bool
+	var printVersion bool
 	cmd := &cobra.Command{
 		Use:  "router",
 		Long: "Router for msgpack RPC service protocol",
 		Run: func(cmd *cobra.Command, args []string) {
+			if printVersion {
+				fmt.Println("Arduino router v" + Version)
+				return
+			}
 			if verbose {
 				cfg.LogLevel = slog.LevelDebug
 			} else {
@@ -55,6 +63,7 @@ func main() {
 		},
 	}
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
+	cmd.Flags().BoolVar(&printVersion, "version", false, "Print version information")
 	cmd.Flags().StringVarP(&cfg.ListenTCPAddr, "listen-port", "l", ":8900", "Listening port for RPC services")
 	cmd.Flags().StringVarP(&cfg.ListenUnixAddr, "unix-port", "u", "/var/run/arduino-router.sock", "Listening port for RPC services")
 	cmd.Flags().StringVarP(&cfg.SerialPortAddr, "serial-port", "p", "", "Serial port address")
