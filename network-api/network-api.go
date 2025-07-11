@@ -12,8 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/arduino/router/msgpackrouter"
-	"github.com/arduino/router/msgpackrpc"
+	"github.com/arduino/arduino-router/msgpackrouter"
+	"github.com/arduino/arduino-router/msgpackrpc"
 )
 
 // Register the Network API methods

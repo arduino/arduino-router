@@ -6,7 +6,7 @@ import (
 	"net"
 	"os"
 
-	"github.com/arduino/router/msgpackrpc"
+	"github.com/arduino/arduino-router/msgpackrpc"
 )
 
 func main() {
@@ -22,19 +22,8 @@ func main() {
 	conn := msgpackrpc.NewConnection(s, s,
 		func(ctx context.Context, _ msgpackrpc.FunctionLogger, method string, params []any) (_result any, _err any) {
 			slog.Info("Received request", "method", method, "params", params)
-			if method == "mult" {
-				if len(params) != 2 {
-					return nil, "invalid params"
-				}
-				a, ok := params[0].(float64)
-				if !ok {
-					return nil, "invalid param type, expected float32"
-				}
-				b, ok := params[1].(float64)
-				if !ok {
-					return nil, "invalid param type, expected float32"
-				}
-				return a * b, nil
+			if method == "ping" {
+				return params, nil
 			}
 			return nil, "method not found: " + method
 		},
@@ -46,9 +35,9 @@ func main() {
 
 	// Register the ping method
 	ctx := context.Background()
-	_, reqErr, err := conn.SendRequest(ctx, "$/register", []any{"mult"})
+	_, reqErr, err := conn.SendRequest(ctx, "$/register", []any{"ping"})
 	if err != nil {
-		slog.Error("Failed to send register request for ping method", "err", err)
+		slog.Error("Failed to send register request for ping method", "err", reqErr)
 		return
 	}
 	if reqErr != nil {

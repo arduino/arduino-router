@@ -7,7 +7,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/arduino/router/msgpackrpc"
+	"github.com/arduino/arduino-router/msgpackrpc"
 
 	"github.com/arduino/go-paths-helper"
 )

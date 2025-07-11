@@ -9,7 +9,7 @@ import (
 	"maps"
 	"sync"
 
-	"github.com/arduino/router/msgpackrpc"
+	"github.com/arduino/arduino-router/msgpackrpc"
 )
 
 type RouterRequestHandler func(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (result any, err any)

@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/arduino/router/msgpackrpc"
+	"github.com/arduino/arduino-router/msgpackrpc"
 
 	"github.com/stretchr/testify/require"
 )

@@ -14,10 +14,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/arduino/router/monitorapi"
-	"github.com/arduino/router/msgpackrouter"
-	"github.com/arduino/router/msgpackrpc"
-	networkapi "github.com/arduino/router/network-api"
+	"github.com/arduino/arduino-router/monitorapi"
+	"github.com/arduino/arduino-router/msgpackrouter"
+	"github.com/arduino/arduino-router/msgpackrpc"
+	networkapi "github.com/arduino/arduino-router/network-api"
 
 	"github.com/spf13/cobra"
 	"go.bug.st/f"
@@ -42,8 +42,8 @@ func main() {
 	var verbose bool
 	var printVersion bool
 	cmd := &cobra.Command{
-		Use:  "router",
-		Long: "Router for msgpack RPC service protocol",
+		Use:  "arduino-router",
+		Long: "Arduino router for msgpack RPC service protocol",
 		Run: func(cmd *cobra.Command, args []string) {
 			if printVersion {
 				fmt.Println("Arduino router v" + Version)
