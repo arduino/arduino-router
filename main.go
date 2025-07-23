@@ -128,6 +128,11 @@ func startRouter(cfg Config) error {
 			slog.Info("Listening on Unix socket", "listen_addr", cfg.ListenUnixAddr)
 			listeners = append(listeners, l)
 		}
+
+		// Allow `arduino` user to write to a socket file owned by `root`
+		if err := os.Chmod(cfg.ListenUnixAddr, 0666); err != nil {
+			return err
+		}
 	}
 
 	// Run router
