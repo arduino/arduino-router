@@ -143,14 +143,14 @@ const testCert = "-----BEGIN CERTIFICATE-----\n" +
 func TestNetworkAPI(t *testing.T) {
 	ctx := t.Context()
 	var rpc *msgpackrpc.Connection
-	listID, err := tcpListen(ctx, rpc, []any{"localhost:8080"})
+	listID, err := tcpListen(ctx, rpc, []any{"localhost:9999"})
 	require.Nil(t, err)
 	require.Equal(t, uint(1), listID)
 
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		connID, err := tcpConnect(ctx, rpc, []any{"localhost:8080"})
+		connID, err := tcpConnect(ctx, rpc, []any{"localhost:9999"})
 		require.Nil(t, err)
 		require.Equal(t, uint(2), connID)
 
