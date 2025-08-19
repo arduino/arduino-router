@@ -150,7 +150,7 @@ func TestNetworkAPI(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
-		connID, err := tcpConnect(ctx, rpc, []any{"localhost:9999"})
+		connID, err := tcpConnect(ctx, rpc, []any{"localhost", uint16(9999)})
 		require.Nil(t, err)
 		require.Equal(t, uint(2), connID)
 
@@ -200,7 +200,7 @@ func TestNetworkAPI(t *testing.T) {
 	require.Nil(t, res)
 
 	// Test SSL connection
-	connIDSSL, err := tcpConnectSSL(ctx, rpc, []any{"www.arduino.cc:443"})
+	connIDSSL, err := tcpConnectSSL(ctx, rpc, []any{"www.arduino.cc", uint16(443)})
 	require.Nil(t, err)
 	require.Equal(t, uint(4), connIDSSL)
 
@@ -209,7 +209,7 @@ func TestNetworkAPI(t *testing.T) {
 	require.Equal(t, "", res)
 
 	// Test SSL connection with failing certificate verification
-	connIDSSL, err = tcpConnectSSL(ctx, rpc, []any{"www.arduino.cc:443", testCert})
+	connIDSSL, err = tcpConnectSSL(ctx, rpc, []any{"www.arduino.cc", uint16(443), testCert})
 	require.Equal(t, []any{2, "Failed to connect to server: tls: failed to verify certificate: x509: certificate signed by unknown authority"}, err)
 	require.Nil(t, connIDSSL)
 }
