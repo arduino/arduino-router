@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -54,13 +55,20 @@ func takeLockAndGenerateNextID() (newID uint, unlock func()) {
 }
 
 func tcpConnect(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
-	if len(params) != 1 {
-		return nil, []any{1, "Invalid number of parameters, expected server address"}
+	if len(params) != 2 {
+		return nil, []any{1, "Invalid number of parameters, expected server address and port"}
 	}
 	serverAddr, ok := params[0].(string)
 	if !ok {
 		return nil, []any{1, "Invalid parameter type, expected string for server address"}
 	}
+	serverPort, ok := msgpackrpc.ToUint(params[1])
+	if !ok {
+		return nil, []any{1, "Invalid parameter type, expected uint16 for server port"}
+	}
+
+	serverAddr = net.JoinHostPort(serverAddr, strconv.FormatUint(uint64(serverPort), 10))
+
 	conn, err := net.Dial("tcp", serverAddr)
 	if err != nil {
 		return nil, []any{2, "Failed to connect to server: " + err.Error()}
@@ -235,16 +243,23 @@ func tcpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_r
 
 func tcpConnectSSL(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
 	n := len(params)
-	if n < 1 || n > 2 {
-		return nil, []any{1, "Invalid number of parameters, expected server address and optional TLS cert"}
+	if n < 1 || n > 3 {
+		return nil, []any{1, "Invalid number of parameters, expected server address, port and optional TLS cert"}
 	}
 	serverAddr, ok := params[0].(string)
 	if !ok {
 		return nil, []any{1, "Invalid parameter type, expected string for server address"}
 	}
+	serverPort, ok := msgpackrpc.ToUint(params[1])
+	if !ok {
+		return nil, []any{1, "Invalid parameter type, expected uint16 for server port"}
+	}
+
+	serverAddr = net.JoinHostPort(serverAddr, strconv.FormatUint(uint64(serverPort), 10))
+
 	var tlsConfig *tls.Config
-	if n == 2 {
-		cert, ok := params[1].(string)
+	if n == 3 {
+		cert, ok := params[2].(string)
 		if !ok {
 			return nil, []any{1, "Invalid parameter type, expected string for TLS cert"}
 		}
