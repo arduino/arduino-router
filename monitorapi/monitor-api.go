@@ -2,21 +2,25 @@ package monitorapi
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net"
-	"os"
 	"sync"
+	"sync/atomic"
 	"time"
+
+	"github.com/djherbis/buffer"
+	"github.com/djherbis/nio/v3"
 
 	"github.com/arduino/arduino-router/msgpackrouter"
 	"github.com/arduino/arduino-router/msgpackrpc"
 )
 
-var lock sync.RWMutex
-var socket net.Conn
-var monitorConnectionLost sync.Cond = *sync.NewCond(&lock)
+var socketsLock sync.RWMutex
+var sockets map[net.Conn]struct{}
+var monSendPipeRd *nio.PipeReader
+var monSendPipeWr *nio.PipeWriter
+var bytesInSendPipe atomic.Int64
 
 // Register the Monitor API methods
 func Register(router *msgpackrouter.Router, addr string) error {
@@ -24,6 +28,9 @@ func Register(router *msgpackrouter.Router, addr string) error {
 	if err != nil {
 		return fmt.Errorf("failed to start listener: %w", err)
 	}
+	sockets = make(map[net.Conn]struct{})
+	monSendPipeRd, monSendPipeWr = nio.Pipe(buffer.New(1024))
+
 	go connectionHandler(listener)
 	_ = router.RegisterMethod("mon/connected", connected)
 	_ = router.RegisterMethod("mon/read", read)
@@ -41,15 +48,26 @@ func connectionHandler(listener net.Listener) {
 		}
 
 		slog.Info("Accepted monitor connection", "from", conn.RemoteAddr())
-		lock.Lock()
-		socket = conn
-		lock.Unlock()
+		socketsLock.Lock()
+		sockets[conn] = struct{}{}
+		socketsLock.Unlock()
 
-		lock.Lock()
-		for socket != nil {
-			monitorConnectionLost.Wait()
-		}
-		lock.Unlock()
+		go func() {
+			defer close(conn)
+
+			// Read from the connection and write to the monitor send pipe
+			buff := make([]byte, 1024)
+			for {
+				if n, err := conn.Read(buff); err != nil {
+					// Connection closed from client
+					return
+				} else if written, err := monSendPipeWr.Write(buff[:n]); err != nil {
+					return
+				} else {
+					bytesInSendPipe.Add(int64(written))
+				}
+			}
+		}()
 	}
 }
 
@@ -58,9 +76,9 @@ func connected(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_
 		return nil, []any{1, "Invalid number of parameters, expected no parameters"}
 	}
 
-	lock.RLock()
-	connected := socket != nil
-	lock.RUnlock()
+	socketsLock.RLock()
+	connected := len(sockets) > 0
+	socketsLock.RUnlock()
 
 	return connected, nil
 }
@@ -74,33 +92,18 @@ func read(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_resul
 		return nil, []any{1, "Invalid parameter type, expected positive int for max bytes to read"}
 	}
 
-	lock.RLock()
-	conn := socket
-	lock.RUnlock()
-
-	// No active connection, return empty slice
-	if conn == nil {
+	if bytesInSendPipe.Load() == 0 {
 		return []byte{}, nil
 	}
 
 	buffer := make([]byte, maxBytes)
-	// It seems that the only way to make a non-blocking read is to set a read deadline.
-	// BTW setting the read deadline to time.Now() will always returns an empty (zero bytes)
-	// read, so we set it to a very short duration in the future.
-	if err := conn.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
-		return nil, []any{3, "Failed to set read timeout: " + err.Error()}
-	}
-	n, err := conn.Read(buffer)
-	if errors.Is(err, os.ErrDeadlineExceeded) {
-		// timeout
-	} else if err != nil {
-		// If we get an error other than timeout, we assume the connection is lost.
-		slog.Error("Monitor connection lost, closing connection", "error", err)
-		close()
+	if readed, err := monSendPipeRd.Read(buffer); err != nil {
+		slog.Error("Error reading monitor", "error", err)
 		return nil, []any{3, "Failed to read from connection: " + err.Error()}
+	} else {
+		bytesInSendPipe.Add(int64(-readed))
+		return buffer[:readed], nil
 	}
-
-	return buffer[:n], nil
 }
 
 func write(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
@@ -117,41 +120,52 @@ func write(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_resu
 		}
 	}
 
-	lock.RLock()
-	conn := socket
-	lock.RUnlock()
+	socketsLock.RLock()
+	clients := make([]net.Conn, 0, len(sockets))
+	for c := range sockets {
+		clients = append(clients, c)
+	}
+	socketsLock.RUnlock()
 
-	if conn == nil { // No active connection, drop the data
-		return len(data), nil
+	for _, conn := range clients {
+		if len(clients) > 1 {
+			// If there are multiple clients, allow 500 ms for the data to
+			// get through each one.
+			_ = conn.SetWriteDeadline(time.Now().Add(time.Millisecond * 500))
+		} else {
+			_ = conn.SetWriteDeadline(time.Time{})
+		}
+		if _, err := conn.Write(data); err != nil {
+			// If we get an error, we assume the connection is lost.
+			slog.Error("Monitor connection lost, closing connection", "error", err)
+			close(conn)
+		}
 	}
 
-	n, err := conn.Write(data)
-	if err != nil {
-		// If we get an error, we assume the connection is lost.
-		slog.Error("Monitor connection lost, closing connection", "error", err)
-		close()
+	return len(data), nil
+}
 
-		return nil, []any{3, "Failed to write to connection: " + err.Error()}
-	}
-
-	return n, nil
+func close(conn net.Conn) {
+	socketsLock.Lock()
+	delete(sockets, conn)
+	socketsLock.Unlock()
+	_ = conn.Close()
 }
 
 func reset(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
 	if len(params) != 0 {
 		return nil, []any{1, "Invalid number of parameters, expected no parameters"}
 	}
-	close()
+
+	socketsLock.Lock()
+	socketsToClose := sockets
+	sockets = make(map[net.Conn]struct{})
+	socketsLock.Unlock()
+
+	for c := range socketsToClose {
+		_ = c.Close()
+	}
+
 	slog.Info("Monitor connection reset")
 	return true, nil
-}
-
-func close() {
-	lock.Lock()
-	if socket != nil {
-		_ = socket.Close()
-	}
-	socket = nil
-	monitorConnectionLost.Broadcast()
-	lock.Unlock()
 }
