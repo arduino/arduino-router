@@ -22,8 +22,9 @@ func Register(router *msgpackrouter.Router) {
 	_ = router.RegisterMethod("tcp/connect", tcpConnect)
 
 	_ = router.RegisterMethod("tcp/listen", tcpListen)
-	_ = router.RegisterMethod("tcp/accept", tcpAccept)
+	_ = router.RegisterMethod("tcp/closeListener", tcpCloseListener)
 
+	_ = router.RegisterMethod("tcp/accept", tcpAccept)
 	_ = router.RegisterMethod("tcp/read", tcpRead)
 	_ = router.RegisterMethod("tcp/write", tcpWrite)
 	_ = router.RegisterMethod("tcp/close", tcpClose)
@@ -83,13 +84,19 @@ func tcpConnect(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (
 }
 
 func tcpListen(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
-	if len(params) != 1 {
-		return nil, []any{1, "Invalid number of parameters, expected listen address"}
+	if len(params) != 2 {
+		return nil, []any{1, "Invalid number of parameters, expected listen address and port"}
 	}
 	listenAddr, ok := params[0].(string)
 	if !ok {
 		return nil, []any{1, "Invalid parameter type, expected string for listen address"}
 	}
+	listenPort, ok := msgpackrpc.ToUint(params[1])
+	if !ok {
+		return nil, []any{1, "Invalid parameter type, expected uint16 for listen port"}
+	}
+
+	listenAddr = net.JoinHostPort(listenAddr, strconv.FormatUint(uint64(listenPort), 10))
 
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
@@ -143,33 +150,50 @@ func tcpClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_r
 
 	lock.Lock()
 	conn, existsConn := liveConnections[id]
-	listener, existsListener := liveListeners[id]
 	if existsConn {
 		delete(liveConnections, id)
 	}
+	lock.Unlock()
+
+	if !existsConn {
+		return nil, []any{2, fmt.Sprintf("Connection not found for ID: %d", id)}
+	}
+
+	// Close the connection if it exists
+	// We do not return an error to the caller if the close operation fails, as it is not critical,
+	// but we only log the error for debugging purposes.
+	if err := conn.Close(); err != nil {
+		return err.Error(), nil
+	}
+	return "", nil
+}
+
+func tcpCloseListener(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+	if len(params) != 1 {
+		return nil, []any{1, "Invalid number of parameters, expected listener ID"}
+	}
+	id, ok := msgpackrpc.ToUint(params[0])
+	if !ok {
+		return nil, []any{1, "Invalid parameter type, expected int for listener ID"}
+	}
+
+	lock.Lock()
+	listener, existsListener := liveListeners[id]
 	if existsListener {
 		delete(liveListeners, id)
 	}
 	lock.Unlock()
 
-	if !existsConn && !existsListener {
-		return nil, []any{2, fmt.Sprintf("Connection not found for ID: %d", id)}
+	if !existsListener {
+		return nil, []any{2, fmt.Sprintf("Listener not found for ID: %d", id)}
 	}
 
-	// Close the connection or listener if it exists
-	// We do not return an error if the close operation fails, as it is not critical,
+	// Close the listener if it exists
+	// We do not return an error to the caller if the close operation fails, as it is not critical,
 	// but we only log the error for debugging purposes.
-	if existsConn {
-		if err := conn.Close(); err != nil {
-			return err.Error(), nil
-		}
+	if err := listener.Close(); err != nil {
+		return err.Error(), nil
 	}
-	if existsListener {
-		if err := listener.Close(); err != nil {
-			return err.Error(), nil
-		}
-	}
-
 	return "", nil
 }
 

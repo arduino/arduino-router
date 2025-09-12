@@ -1,6 +1,7 @@
 package networkapi
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 
@@ -143,16 +144,14 @@ const testCert = "-----BEGIN CERTIFICATE-----\n" +
 func TestNetworkAPI(t *testing.T) {
 	ctx := t.Context()
 	var rpc *msgpackrpc.Connection
-	listID, err := tcpListen(ctx, rpc, []any{"localhost:9999"})
+	listID, err := tcpListen(ctx, rpc, []any{"localhost", 9999})
 	require.Nil(t, err)
 	require.Equal(t, uint(1), listID)
 
 	var wg sync.WaitGroup
-	wg.Add(1)
-	go func() {
+	wg.Go(func() {
 		connID, err := tcpConnect(ctx, rpc, []any{"localhost", uint16(9999)})
 		require.Nil(t, err)
-		require.Equal(t, uint(2), connID)
 
 		n, err := tcpWrite(ctx, rpc, []any{connID, []byte("Hello")})
 		require.Nil(t, err)
@@ -163,17 +162,12 @@ func TestNetworkAPI(t *testing.T) {
 		require.Equal(t, "", res)
 
 		res, err = tcpClose(ctx, rpc, []any{connID})
-		require.Equal(t, []any{2, "Connection not found for ID: 2"}, err)
+		require.Equal(t, []any{2, fmt.Sprintf("Connection not found for ID: %d", connID)}, err)
 		require.Nil(t, res)
-
-		wg.Done()
-	}()
-
-	wg.Wait()
+	})
 
 	connID, err := tcpAccept(ctx, rpc, []any{listID})
 	require.Nil(t, err)
-	require.Equal(t, uint(3), connID)
 
 	buff, err := tcpRead(ctx, rpc, []any{connID, 3})
 	require.Nil(t, err)
@@ -187,16 +181,28 @@ func TestNetworkAPI(t *testing.T) {
 	require.Equal(t, []any{3, "Failed to read from connection: EOF"}, err)
 	require.Nil(t, buff)
 
-	res, err := tcpClose(ctx, rpc, []any{connID})
+	res, err := tcpCloseListener(ctx, rpc, []any{connID})
+	require.Equal(t, []any{2, fmt.Sprintf("Listener not found for ID: %d", connID)}, err)
+	require.Nil(t, res)
+
+	res, err = tcpClose(ctx, rpc, []any{connID})
 	require.Nil(t, err)
 	require.Equal(t, "", res)
 
 	res, err = tcpClose(ctx, rpc, []any{listID})
+	require.Equal(t, []any{2, fmt.Sprintf("Connection not found for ID: %d", listID)}, err)
+	require.Nil(t, res)
+
+	res, err = tcpCloseListener(ctx, rpc, []any{listID})
 	require.Nil(t, err)
 	require.Equal(t, "", res)
 
 	res, err = tcpClose(ctx, rpc, []any{listID})
-	require.Equal(t, []any{2, "Connection not found for ID: 1"}, err)
+	require.Equal(t, []any{2, fmt.Sprintf("Connection not found for ID: %d", listID)}, err)
+	require.Nil(t, res)
+
+	res, err = tcpCloseListener(ctx, rpc, []any{listID})
+	require.Equal(t, []any{2, fmt.Sprintf("Listener not found for ID: %d", listID)}, err)
 	require.Nil(t, res)
 
 	// Test SSL connection
@@ -212,4 +218,6 @@ func TestNetworkAPI(t *testing.T) {
 	connIDSSL, err = tcpConnectSSL(ctx, rpc, []any{"www.arduino.cc", uint16(443), testCert})
 	require.Equal(t, []any{2, "Failed to connect to server: tls: failed to verify certificate: x509: certificate signed by unknown authority"}, err)
 	require.Nil(t, connIDSSL)
+
+	wg.Wait()
 }
