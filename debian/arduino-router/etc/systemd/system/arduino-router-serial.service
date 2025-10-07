@@ -1,0 +1,15 @@
+[Unit]
+Description=Proxy for the Arduino Router Monitor to ttyGS0 serial
+After=network-online.target arduino-router.service
+Wants=network-online.target arduino-router.service
+Requires=arduino-router.service
+
+[Service]
+ExecStart=/usr/bin/socat file:/dev/ttyGS0,raw,echo=0,b9600,crtscts=0 tcp:127.0.0.1:7500
+StandardOutput=journal
+StandardError=journal
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

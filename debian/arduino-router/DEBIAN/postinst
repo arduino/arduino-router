@@ -1,3 +1,13 @@
 #!/bin/sh
 
+if [ -d /run/systemd/system ]; then
+  systemctl daemon-reload
+fi
+
 systemctl enable arduino-router
+systemctl enable arduino-router-serial
+
+if [ -d /run/systemd/system ]; then
+  systemctl start arduino-router
+  systemctl start arduino-router-serial
+fi
