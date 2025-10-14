@@ -106,19 +106,19 @@ tasks:
       - task: general:prepare-deps
     cmds:
       - |
-        if
-          ! which licensed \
-          &>/dev/null
-        then
-          if [[ {{OS}} == "windows" ]]; then
-            echo "Licensed does not have Windows support."
-            echo "Please use Linux/macOS or download the dependencies cache from the GitHub Actions workflow artifact."
-          else
-            echo "licensed not found or not in PATH."
-            echo "Please install: https://github.com/licensee/licensed#installation"
+          if
+            ! which licensed \
+            &>/dev/null
+          then
+            if [[ {{OS}} == "windows" ]]; then
+              echo "Licensed does not have Windows support."
+              echo "Please use Linux/macOS or download the dependencies cache from the GitHub Actions workflow artifact."
+            else
+              echo "licensed not found or not in PATH."
+              echo "Please install: https://github.com/licensee/licensed#installation"
+            fi
+            exit 1
           fi
-          exit 1
-        fi
       - licensed cache
 
   # Source: https://github.com/arduino/tooling-project-assets/blob/main/workflow-templates/assets/check-dependencies-task/Taskfile.yml

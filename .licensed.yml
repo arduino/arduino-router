@@ -91,5 +91,3 @@ allowed:
 reviewed:
   go:
     - golang.org/x/sys/unix@v0.37.0
-
-
