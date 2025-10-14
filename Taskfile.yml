@@ -77,7 +77,6 @@ tasks:
     desc: Extract project and dependency licenses into asd copyright
     cmds:
       - |
-          licensed cache
           licensed notices
 
           cat > debian/arduino-router/usr/share/doc/arduino-router/copyright <<EOF
