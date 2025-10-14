@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/arduino/arduino-router/hciapi"
 	"github.com/arduino/arduino-router/monitorapi"
 	"github.com/arduino/arduino-router/msgpackrouter"
 	"github.com/arduino/arduino-router/msgpackrpc"
@@ -140,6 +141,9 @@ func startRouter(cfg Config) error {
 
 	// Register TCP network API methods
 	networkapi.Register(router)
+
+	// Register HCI API methods
+	hciapi.Register(router)
 
 	// Register monitor API methods
 	if err := monitorapi.Register(router, cfg.MonitorPortAddr); err != nil {
