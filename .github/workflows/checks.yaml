@@ -43,6 +43,17 @@ jobs:
           version: 3.x
           repo-token: ${{ secrets.GITHUB_TOKEN }}
 
+      # This is required to allow licensee/setup-licensed to install Licensed via Ruby gem.
+      - name: Install Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: ruby # Install latest version
+      - name: Install licensed
+        uses: licensee/setup-licensed@v1.3.2
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          version: 5.x
+
       - name: Run deb copyright check
         run: |
           task update-deb-copyright
