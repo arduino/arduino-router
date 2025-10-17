@@ -37,12 +37,6 @@ jobs:
           go mod tidy
           git diff --color --exit-code
 
-      - name: Install Task
-        uses: arduino/setup-task@v2
-        with:
-          version: 3.x
-          repo-token: ${{ secrets.GITHUB_TOKEN }}
-
       # This is required to allow licensee/setup-licensed to install Licensed via Ruby gem.
       - name: Install Ruby
         uses: ruby/setup-ruby@v1
@@ -56,5 +50,5 @@ jobs:
 
       - name: Run deb copyright check
         run: |
-          task update-deb-copyright
+          go tool task update-deb-copyright
           git diff --color --exit-code
