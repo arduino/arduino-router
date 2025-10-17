@@ -156,7 +156,7 @@ const testCert = "-----BEGIN CERTIFICATE-----\n" +
 	"HAIgNadMPgxv01dy59kCgzehgKzmKdTF0rG1SniYqnkLqPA=\n" +
 	"-----END CERTIFICATE-----\n"
 
-func TestNetworkAPI(t *testing.T) {
+func TestTCPNetworkAPI(t *testing.T) {
 	ctx := t.Context()
 	var rpc *msgpackrpc.Connection
 	listID, err := tcpListen(ctx, rpc, []any{"localhost", 9999})
@@ -235,4 +235,106 @@ func TestNetworkAPI(t *testing.T) {
 	require.Nil(t, connIDSSL)
 
 	wg.Wait()
+}
+
+func TestUDPNetworkAPI(t *testing.T) {
+	ctx := t.Context()
+	conn1, err := udpConnect(ctx, nil, []any{"0.0.0.0", 9800})
+	require.Nil(t, err)
+
+	conn2, err := udpConnect(ctx, nil, []any{"0.0.0.0", 9900})
+	require.Nil(t, err)
+	require.NotEqual(t, conn1, conn2)
+
+	{
+		res, err := udpWrite(ctx, nil, []any{conn1, "127.0.0.1", 9900, []byte("Hello")})
+		require.Nil(t, err)
+		require.Equal(t, 5, res)
+	}
+	{
+		res, err := udpRead(ctx, nil, []any{conn2, 100})
+		require.Nil(t, err)
+		require.Equal(t, []any{[]uint8("Hello"), "127.0.0.1", 9800}, res)
+	}
+	{
+		res, err := udpWrite(ctx, nil, []any{conn1, "127.0.0.1", 9900, []byte("One")})
+		require.Nil(t, err)
+		require.Equal(t, 3, res)
+	}
+	{
+		res, err := udpWrite(ctx, nil, []any{conn1, "127.0.0.1", 9900, []byte("Two")})
+		require.Nil(t, err)
+		require.Equal(t, 3, res)
+	}
+	{
+		res, err := udpRead(ctx, nil, []any{conn2, 100})
+		require.Nil(t, err)
+		require.Equal(t, []any{[]uint8("One"), "127.0.0.1", 9800}, res)
+	}
+	{
+		res, err := udpRead(ctx, nil, []any{conn2, 100})
+		require.Nil(t, err)
+		require.Equal(t, []any{[]uint8("Two"), "127.0.0.1", 9800}, res)
+	}
+	{
+		res, err := udpClose(ctx, nil, []any{conn1})
+		require.Nil(t, err)
+		require.Equal(t, "", res)
+	}
+	{
+		res, err := udpClose(ctx, nil, []any{conn2})
+		require.Nil(t, err)
+		require.Equal(t, "", res)
+	}
+}
+
+func TestUDPNetworkUnboundClientAPI(t *testing.T) {
+	ctx := t.Context()
+	conn1, err := udpConnect(ctx, nil, []any{"", 0})
+	require.Nil(t, err)
+
+	conn2, err := udpConnect(ctx, nil, []any{"0.0.0.0", 9900})
+	require.Nil(t, err)
+	require.NotEqual(t, conn1, conn2)
+
+	{
+		res, err := udpWrite(ctx, nil, []any{conn1, "127.0.0.1", 9900, []byte("Hello")})
+		require.Nil(t, err)
+		require.Equal(t, 5, res)
+	}
+	{
+		res, err := udpRead(ctx, nil, []any{conn2, 100})
+		require.Nil(t, err)
+		require.Equal(t, []uint8("Hello"), res.([]any)[0])
+	}
+	{
+		res, err := udpWrite(ctx, nil, []any{conn1, "127.0.0.1", 9900, []byte("One")})
+		require.Nil(t, err)
+		require.Equal(t, 3, res)
+	}
+	{
+		res, err := udpWrite(ctx, nil, []any{conn1, "127.0.0.1", 9900, []byte("Two")})
+		require.Nil(t, err)
+		require.Equal(t, 3, res)
+	}
+	{
+		res, err := udpRead(ctx, nil, []any{conn2, 100})
+		require.Nil(t, err)
+		require.Equal(t, []uint8("One"), res.([]any)[0])
+	}
+	{
+		res, err := udpRead(ctx, nil, []any{conn2, 100})
+		require.Nil(t, err)
+		require.Equal(t, []uint8("Two"), res.([]any)[0])
+	}
+	{
+		res, err := udpClose(ctx, nil, []any{conn1})
+		require.Nil(t, err)
+		require.Equal(t, "", res)
+	}
+	{
+		res, err := udpClose(ctx, nil, []any{conn2})
+		require.Nil(t, err)
+		require.Equal(t, "", res)
+	}
 }
