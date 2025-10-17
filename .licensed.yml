@@ -1,14 +1,10 @@
 sources:
-  go: {}
+  go: true
 
-cache_path: licenses
+cache_path: .licenses/
 
 apps:
-  - name: arduino-router
-    source_path: .
-    cache_path: .licenses/arduino-router
-    include_sources:
-      - go
+  - source_path: ./
 
 # Source: https://github.com/arduino/tooling-project-assets/blob/main/workflow-templates/assets/check-dependencies/GPL-3.0/.licensed.yml
 allowed:
@@ -88,6 +84,3 @@ allowed:
   - liliq-r-1.1
   - liliq-rplus-1.1
 
-reviewed:
-  go:
-    - golang.org/x/sys/unix@v0.37.0
