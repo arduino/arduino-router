@@ -12,11 +12,11 @@ indent_style = space
 indent_size = 2
 
 # Use utf-8 charset for modern languages
-[*.{js,py,go}]
+[*.{go}]
 charset = utf-8
 
 # Use tab indentation for Go and Makefiles
-[{*.go,go.*,Makefile}]
+[{*.go,go.*}]
 indent_style = tab
 indent_size = 4
 
