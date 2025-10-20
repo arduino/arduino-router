@@ -62,7 +62,6 @@ tasks:
     vars:
       ARCH: '{{.ARCH | default "arm64"}}'
 
-
   release:
     desc: Create a tag on the current commit and push it to the remote to create the release
     cmds:
