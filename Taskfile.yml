@@ -62,6 +62,18 @@ tasks:
     vars:
       ARCH: '{{.ARCH | default "arm64"}}'
 
+
+  release:
+    desc: Create a tag on the current commit and push it to the remote to create the release
+    cmds:
+      - |
+          if [ -z "{{.CLI_ARGS}}" ]; then
+            echo "Error: Version argument is required. Usage: task release -- <version>"
+            exit 1
+          fi
+      - git tag -a "{{.CLI_ARGS}}" -m "Release {{.CLI_ARGS}}"
+      - git push origin "{{.CLI_ARGS}}"
+
   board:install:
     desc: Install arduino-router on the board
     interactive: true
