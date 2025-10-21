@@ -347,7 +347,7 @@ func udpConnect(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (
 		return nil, []any{1, "Invalid parameter type, expected uint16 for server port"}
 	}
 
-	serverAddr = net.JoinHostPort(serverAddr, strconv.Itoa(int(serverPort)))
+	serverAddr = net.JoinHostPort(serverAddr, fmt.Sprintf("%d", serverPort))
 	udpAddr, err := net.ResolveUDPAddr("udp", serverAddr)
 	if err != nil {
 		return nil, []any{2, "Failed to resolve UDP address: " + err.Error()}
@@ -398,7 +398,7 @@ func udpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_r
 		return nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)}
 	}
 
-	targetAddr := net.JoinHostPort(targetIP, strconv.Itoa(int(targetPort)))
+	targetAddr := net.JoinHostPort(targetIP, fmt.Sprintf("%d", targetPort))
 	addr, err := net.ResolveUDPAddr("udp", targetAddr) // TODO: This is inefficient, implement some caching
 	if err != nil {
 		return nil, []any{3, "Failed to resolve target address: " + err.Error()}
