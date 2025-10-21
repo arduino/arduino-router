@@ -69,8 +69,8 @@ tasks:
       - git tag "{{ .TAG }}"
       - git push origin "{{ .TAG }}"
     vars:
-      TAG: 
-        sh:  |
+      TAG:
+        sh: |
           TAGARG="{{.CLI_ARGS}}"
           if ! echo "$TAGARG" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+.*$'; then
             echo "Error: Version must match pattern 'v[0-9]+.[0-9]+.[0-9]+*'"
