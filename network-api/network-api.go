@@ -218,8 +218,8 @@ func tcpCloseListener(ctx context.Context, rpc *msgpackrpc.Connection, params []
 }
 
 func tcpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
-	if len(params) != 2 {
-		return nil, []any{1, "Invalid number of parameters, expected (connection ID, max bytes to read)"}
+	if len(params) != 2 && len(params) != 3 {
+		return nil, []any{1, "Invalid number of parameters, expected (connection ID, max bytes to read[, optional timeout in ms])"}
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
@@ -235,12 +235,22 @@ func tcpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_re
 	if !ok {
 		return nil, []any{1, "Invalid parameter type, expected int for max bytes to read"}
 	}
+	var deadline time.Time // default value == no timeout
+	if len(params) == 2 {
+		// It seems that there is no way to set a 0 ms timeout (immediate return) on a TCP connection.
+		// Setting the read deadline to time.Now() will always returns an empty (zero bytes)
+		// read, so we set it by default to a very short duration in the future (1 ms).
+		deadline = time.Now().Add(time.Millisecond)
+	} else if ms, ok := msgpackrpc.ToInt(params[2]); !ok {
+		return nil, []any{1, "Invalid parameter type, expected int for timeout in ms"}
+	} else if ms > 0 {
+		deadline = time.Now().Add(time.Duration(ms) * time.Millisecond)
+	} else if ms == 0 {
+		// No timeout
+	}
 
 	buffer := make([]byte, maxBytes)
-	// It seems that the only way to make a non-blocking read is to set a read deadline.
-	// BTW setting the read deadline to time.Now() will always returns an empty (zero bytes)
-	// read, so we set it to a very short duration in the future.
-	if err := conn.SetReadDeadline(time.Now().Add(time.Millisecond)); err != nil {
+	if err := conn.SetReadDeadline(deadline); err != nil {
 		return nil, []any{3, "Failed to set read timeout: " + err.Error()}
 	}
 	n, err := conn.Read(buffer)
@@ -411,8 +421,8 @@ func udpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_r
 }
 
 func udpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
-	if len(params) != 2 {
-		return nil, []any{1, "Invalid number of parameters, expected (UDP connection ID, max bytes to read)"}
+	if len(params) != 2 && len(params) != 3 {
+		return nil, []any{1, "Invalid number of parameters, expected (UDP connection ID, max bytes to read[, optional timeout in ms])"}
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
@@ -428,10 +438,26 @@ func udpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_re
 	if !ok {
 		return nil, []any{1, "Invalid parameter type, expected uint for max bytes to read"}
 	}
+	var deadline time.Time // default value == no timeout
+	if len(params) == 2 {
+		// No timeout
+	} else if ms, ok := msgpackrpc.ToInt(params[2]); !ok {
+		return nil, []any{1, "Invalid parameter type, expected int for timeout in ms"}
+	} else if ms > 0 {
+		deadline = time.Now().Add(time.Duration(ms) * time.Millisecond)
+	} else if ms == 0 {
+		// No timeout
+	}
 
+	if err := udpConn.SetReadDeadline(deadline); err != nil {
+		return nil, []any{3, "Failed to set read deadline: " + err.Error()}
+	}
 	buffer := make([]byte, maxBytes)
-
 	n, addr, err := udpConn.ReadFrom(buffer)
+	if errors.Is(err, os.ErrDeadlineExceeded) {
+		// timeout
+		return nil, []any{5, "Timeout"}
+	}
 	if err != nil {
 		return nil, []any{3, "Failed to read from UDP connection: " + err.Error()}
 	}

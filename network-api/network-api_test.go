@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/arduino/arduino-router/msgpackrpc"
 
@@ -327,6 +328,27 @@ func TestUDPNetworkUnboundClientAPI(t *testing.T) {
 		require.Nil(t, err)
 		require.Equal(t, []uint8("Two"), res.([]any)[0])
 	}
+
+	// Check timeouts
+	go func() {
+		time.Sleep(200 * time.Millisecond)
+		res, err := udpWrite(ctx, nil, []any{conn1, "127.0.0.1", 9900, []byte("Three")})
+		require.Nil(t, err)
+		require.Equal(t, 5, res)
+	}()
+	{
+		start := time.Now()
+		res, err := udpRead(ctx, nil, []any{conn2, 100, 10})
+		require.Less(t, time.Since(start), 20*time.Millisecond)
+		require.Equal(t, []any{5, "Timeout"}, err)
+		require.Nil(t, res)
+	}
+	{
+		res, err := udpRead(ctx, nil, []any{conn2, 100, 0})
+		require.Nil(t, err)
+		require.Equal(t, []uint8("Three"), res.([]any)[0])
+	}
+
 	{
 		res, err := udpClose(ctx, nil, []any{conn1})
 		require.Nil(t, err)
