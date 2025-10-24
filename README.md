@@ -6,7 +6,7 @@ Each client can connect to the Router and expose RPC services by registering its
 
 To understand more about MessagePack encoding see: <https://msgpack.org/>
 
-This package provides also a MessagePack RPC client in `msgpackrpc` package. To get more details about MessagePack RPC and this implementation see [here](msgpackrpc/README.md).
+This module provides also a MessagePack RPC client in the `msgpackrpc` package. To get more details about MessagePack RPC and this implementation see [here](msgpackrpc/README.md).
 
 ### Methods implemented in the Router
 
