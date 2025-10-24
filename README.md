@@ -2,7 +2,7 @@
 
 This module implements a MessagePack RPC Router that allows RPC calls between multiple MessagePack RPC clients, connected together in a star topology network, where the Router is the central node.
 
-Each client can connect to the Router and expose RPC services by registering his methods using a special RPC call implemented in the Router. During normal operation, when the Router receives an RPC request, it redirects the request to the client that has previously registered the corresponding method and it will forwards back the response to the client that originated the RPC request.
+Each client can connect to the Router and expose RPC services by registering its methods using a special RPC call implemented in the Router. During normal operation, when the Router receives an RPC request, it redirects the request to the client that has previously registered the corresponding method and it will forward back the response to the client that originated the RPC request.
 
 To understand more about MessagePack encoding see: <https://msgpack.org/>
 
