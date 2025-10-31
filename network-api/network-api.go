@@ -247,8 +247,6 @@ func tcpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_re
 		return nil, []any{1, "Invalid parameter type, expected int for timeout in ms"}
 	} else if ms > 0 {
 		deadline = time.Now().Add(time.Duration(ms) * time.Millisecond)
-	} else if ms == 0 {
-		// No timeout
 	}
 
 	buffer := make([]byte, maxBytes)
@@ -431,14 +429,12 @@ func udpAwaitRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any)
 		return nil, []any{1, "Invalid parameter type, expected uint for UDP connection ID"}
 	}
 	var deadline time.Time // default value == no timeout
-	if len(params) == 1 {
-		// No timeout
-	} else if ms, ok := msgpackrpc.ToInt(params[1]); !ok {
-		return nil, []any{1, "Invalid parameter type, expected int for timeout in ms"}
-	} else if ms > 0 {
-		deadline = time.Now().Add(time.Duration(ms) * time.Millisecond)
-	} else if ms == 0 {
-		// No timeout
+	if len(params) == 2 {
+		if ms, ok := msgpackrpc.ToInt(params[1]); !ok {
+			return nil, []any{1, "Invalid parameter type, expected int for timeout in ms"}
+		} else if ms > 0 {
+			deadline = time.Now().Add(time.Duration(ms) * time.Millisecond)
+		}
 	}
 
 	lock.RLock()
