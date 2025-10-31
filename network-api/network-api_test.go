@@ -253,9 +253,13 @@ func TestUDPNetworkAPI(t *testing.T) {
 		require.Equal(t, 5, res)
 	}
 	{
-		res, err := udpRead(ctx, nil, []any{conn2, 100})
+		res, err := udpAwaitRead(ctx, nil, []any{conn2})
 		require.Nil(t, err)
-		require.Equal(t, []any{[]uint8("Hello"), "127.0.0.1", 9800}, res)
+		require.Equal(t, []any{5, "127.0.0.1", 9800}, res)
+
+		res2, err := udpRead(ctx, nil, []any{conn2, 100})
+		require.Nil(t, err)
+		require.Equal(t, []uint8("Hello"), res2)
 	}
 	{
 		res, err := udpWrite(ctx, nil, []any{conn1, "127.0.0.1", 9900, []byte("One")})
@@ -268,14 +272,22 @@ func TestUDPNetworkAPI(t *testing.T) {
 		require.Equal(t, 3, res)
 	}
 	{
-		res, err := udpRead(ctx, nil, []any{conn2, 100})
+		res, err := udpAwaitRead(ctx, nil, []any{conn2})
 		require.Nil(t, err)
-		require.Equal(t, []any{[]uint8("One"), "127.0.0.1", 9800}, res)
+		require.Equal(t, []any{3, "127.0.0.1", 9800}, res)
+
+		res2, err := udpRead(ctx, nil, []any{conn2, 100})
+		require.Nil(t, err)
+		require.Equal(t, []uint8("One"), res2)
 	}
 	{
-		res, err := udpRead(ctx, nil, []any{conn2, 100})
+		res, err := udpAwaitRead(ctx, nil, []any{conn2})
 		require.Nil(t, err)
-		require.Equal(t, []any{[]uint8("Two"), "127.0.0.1", 9800}, res)
+		require.Equal(t, []any{3, "127.0.0.1", 9800}, res)
+
+		res2, err := udpRead(ctx, nil, []any{conn2, 100})
+		require.Nil(t, err)
+		require.Equal(t, []uint8("Two"), res2)
 	}
 	{
 		res, err := udpClose(ctx, nil, []any{conn1})
@@ -304,9 +316,17 @@ func TestUDPNetworkUnboundClientAPI(t *testing.T) {
 		require.Equal(t, 5, res)
 	}
 	{
-		res, err := udpRead(ctx, nil, []any{conn2, 100})
+		res, err := udpAwaitRead(ctx, nil, []any{conn2})
 		require.Nil(t, err)
-		require.Equal(t, []uint8("Hello"), res.([]any)[0])
+		require.Equal(t, 5, res.([]any)[0])
+
+		res2, err := udpRead(ctx, nil, []any{conn2, 2})
+		require.Nil(t, err)
+		require.Equal(t, []uint8("He"), res2)
+
+		res2, err = udpRead(ctx, nil, []any{conn2, 20})
+		require.Nil(t, err)
+		require.Equal(t, []uint8("llo"), res2)
 	}
 	{
 		res, err := udpWrite(ctx, nil, []any{conn1, "127.0.0.1", 9900, []byte("One")})
@@ -319,14 +339,22 @@ func TestUDPNetworkUnboundClientAPI(t *testing.T) {
 		require.Equal(t, 3, res)
 	}
 	{
-		res, err := udpRead(ctx, nil, []any{conn2, 100})
+		res, err := udpAwaitRead(ctx, nil, []any{conn2})
 		require.Nil(t, err)
-		require.Equal(t, []uint8("One"), res.([]any)[0])
+		require.Equal(t, 3, res.([]any)[0])
+
+		res2, err := udpRead(ctx, nil, []any{conn2, 100})
+		require.Nil(t, err)
+		require.Equal(t, []uint8("One"), res2)
 	}
 	{
-		res, err := udpRead(ctx, nil, []any{conn2, 100})
+		res, err := udpAwaitRead(ctx, nil, []any{conn2})
 		require.Nil(t, err)
-		require.Equal(t, []uint8("Two"), res.([]any)[0])
+		require.Equal(t, 3, res.([]any)[0])
+
+		res2, err := udpRead(ctx, nil, []any{conn2, 100})
+		require.Nil(t, err)
+		require.Equal(t, []uint8("Two"), res2)
 	}
 
 	// Check timeouts
@@ -338,15 +366,19 @@ func TestUDPNetworkUnboundClientAPI(t *testing.T) {
 	}()
 	{
 		start := time.Now()
-		res, err := udpRead(ctx, nil, []any{conn2, 100, 10})
+		res, err := udpAwaitRead(ctx, nil, []any{conn2, 10})
 		require.Less(t, time.Since(start), 20*time.Millisecond)
 		require.Equal(t, []any{5, "Timeout"}, err)
 		require.Nil(t, res)
 	}
 	{
-		res, err := udpRead(ctx, nil, []any{conn2, 100, 0})
+		res, err := udpAwaitRead(ctx, nil, []any{conn2, 0})
 		require.Nil(t, err)
-		require.Equal(t, []uint8("Three"), res.([]any)[0])
+		require.Equal(t, 5, res.([]any)[0])
+
+		res2, err := udpRead(ctx, nil, []any{conn2, 100, 0})
+		require.Nil(t, err)
+		require.Equal(t, []uint8("Three"), res2)
 	}
 
 	{

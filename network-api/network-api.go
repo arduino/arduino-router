@@ -48,6 +48,7 @@ func Register(router *msgpackrouter.Router) {
 
 	_ = router.RegisterMethod("udp/connect", udpConnect)
 	_ = router.RegisterMethod("udp/write", udpWrite)
+	_ = router.RegisterMethod("udp/awaitRead", udpAwaitRead)
 	_ = router.RegisterMethod("udp/read", udpRead)
 	_ = router.RegisterMethod("udp/close", udpClose)
 }
@@ -56,6 +57,7 @@ var lock sync.RWMutex
 var liveConnections = make(map[uint]net.Conn)
 var liveListeners = make(map[uint]net.Listener)
 var liveUdpConnections = make(map[uint]net.PacketConn)
+var udpReadBuffers = make(map[uint][]byte)
 var nextConnectionID atomic.Uint32
 
 // takeLockAndGenerateNextID generates a new unique ID for a connection or listener.
@@ -420,28 +422,18 @@ func udpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_r
 	}
 }
 
-func udpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
-	if len(params) != 2 && len(params) != 3 {
-		return nil, []any{1, "Invalid number of parameters, expected (UDP connection ID, max bytes to read[, optional timeout in ms])"}
+func udpAwaitRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+	if len(params) != 1 && len(params) != 2 {
+		return nil, []any{1, "Invalid number of parameters, expected (UDP connection ID[, optional timeout in ms])"}
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
 		return nil, []any{1, "Invalid parameter type, expected uint for UDP connection ID"}
 	}
-	lock.RLock()
-	udpConn, ok := liveUdpConnections[id]
-	lock.RUnlock()
-	if !ok {
-		return nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)}
-	}
-	maxBytes, ok := msgpackrpc.ToUint(params[1])
-	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected uint for max bytes to read"}
-	}
 	var deadline time.Time // default value == no timeout
-	if len(params) == 2 {
+	if len(params) == 1 {
 		// No timeout
-	} else if ms, ok := msgpackrpc.ToInt(params[2]); !ok {
+	} else if ms, ok := msgpackrpc.ToInt(params[1]); !ok {
 		return nil, []any{1, "Invalid parameter type, expected int for timeout in ms"}
 	} else if ms > 0 {
 		deadline = time.Now().Add(time.Duration(ms) * time.Millisecond)
@@ -449,10 +441,16 @@ func udpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_re
 		// No timeout
 	}
 
+	lock.RLock()
+	udpConn, ok := liveUdpConnections[id]
+	lock.RUnlock()
+	if !ok {
+		return nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)}
+	}
 	if err := udpConn.SetReadDeadline(deadline); err != nil {
 		return nil, []any{3, "Failed to set read deadline: " + err.Error()}
 	}
-	buffer := make([]byte, maxBytes)
+	buffer := make([]byte, 64*1024) // 64 KB buffer
 	n, addr, err := udpConn.ReadFrom(buffer)
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		// timeout
@@ -471,7 +469,41 @@ func udpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_re
 		// Should never fail, but...
 		return nil, []any{4, "Failed to parse source address: " + err.Error()}
 	}
-	return []any{buffer[:n], host, port}, nil
+
+	lock.Lock()
+	udpReadBuffers[id] = buffer[:n]
+	lock.Unlock()
+	return []any{n, host, port}, nil
+}
+
+func udpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+	if len(params) != 2 && len(params) != 3 {
+		return nil, []any{1, "Invalid number of parameters, expected (UDP connection ID, max bytes to read)"}
+	}
+	id, ok := msgpackrpc.ToUint(params[0])
+	if !ok {
+		return nil, []any{1, "Invalid parameter type, expected uint for UDP connection ID"}
+	}
+	maxBytes, ok := msgpackrpc.ToUint(params[1])
+	if !ok {
+		return nil, []any{1, "Invalid parameter type, expected uint for max bytes to read"}
+	}
+
+	lock.Lock()
+	buffer, exists := udpReadBuffers[id]
+	n := uint(len(buffer))
+	if exists {
+		// keep the remainder of the buffer for the next read
+		if n > maxBytes {
+			udpReadBuffers[id] = buffer[maxBytes:]
+			n = maxBytes
+		} else {
+			udpReadBuffers[id] = nil
+		}
+	}
+	lock.Unlock()
+
+	return buffer[:n], nil
 }
 
 func udpClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
@@ -485,9 +517,8 @@ func udpClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_r
 
 	lock.Lock()
 	udpConn, existsConn := liveUdpConnections[id]
-	if existsConn {
-		delete(liveUdpConnections, id)
-	}
+	delete(liveUdpConnections, id)
+	delete(udpReadBuffers, id)
 	lock.Unlock()
 
 	if !existsConn {
