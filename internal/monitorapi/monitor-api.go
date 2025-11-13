@@ -27,7 +27,7 @@ import (
 	"github.com/djherbis/buffer"
 	"github.com/djherbis/nio/v3"
 
-	"github.com/arduino/arduino-router/msgpackrouter"
+	"github.com/arduino/arduino-router/internal/msgpackrouter"
 	"github.com/arduino/arduino-router/msgpackrpc"
 )
 

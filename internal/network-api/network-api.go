@@ -28,7 +28,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/arduino/arduino-router/msgpackrouter"
+	"github.com/arduino/arduino-router/internal/msgpackrouter"
 	"github.com/arduino/arduino-router/msgpackrpc"
 )
 
