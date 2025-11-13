@@ -56,15 +56,10 @@ type Config struct {
 func main() {
 	var cfg Config
 	var verbose bool
-	var printVersion bool
 	cmd := &cobra.Command{
 		Use:  "arduino-router",
 		Long: "Arduino router for msgpack RPC service protocol",
 		Run: func(cmd *cobra.Command, args []string) {
-			if printVersion {
-				fmt.Println("Arduino router v" + Version)
-				return
-			}
 			if verbose {
 				cfg.LogLevel = slog.LevelDebug
 			} else {
@@ -80,12 +75,20 @@ func main() {
 		},
 	}
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
-	cmd.Flags().BoolVar(&printVersion, "version", false, "Print version information")
 	cmd.Flags().StringVarP(&cfg.ListenTCPAddr, "listen-port", "l", "", "Listening port for RPC services")
 	cmd.Flags().StringVarP(&cfg.ListenUnixAddr, "unix-port", "u", "/var/run/arduino-router.sock", "Listening port for RPC services")
 	cmd.Flags().StringVarP(&cfg.SerialPortAddr, "serial-port", "p", "", "Serial port address")
 	cmd.Flags().IntVarP(&cfg.SerialBaudRate, "serial-baudrate", "b", 115200, "Serial port baud rate")
 	cmd.Flags().StringVarP(&cfg.MonitorPortAddr, "monitor-port", "m", "127.0.0.1:7500", "Listening port for MCU monitor proxy")
+
+	cmd.AddCommand(&cobra.Command{
+		Use:  "version",
+		Long: "Print version information",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Println("Arduino Router v" + Version)
+		},
+	})
+
 	if err := cmd.Execute(); err != nil {
 		slog.Error("Error executing command.", "error", err)
 	}
@@ -159,6 +162,13 @@ func startRouter(cfg Config) error {
 
 	// Register HCI API methods
 	hciapi.Register(router)
+
+	// Register monitor version API methods
+	if err := router.RegisterMethod("$/version", func(_ context.Context, _ *msgpackrpc.Connection, _ []any) (any, any) {
+		return Version, nil
+	}); err != nil {
+		slog.Error("Failed to register version API", "err", err)
+	}
 
 	// Register monitor API methods
 	if err := monitorapi.Register(router, cfg.MonitorPortAddr); err != nil {
