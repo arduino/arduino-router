@@ -414,7 +414,7 @@ func udpBeginPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []an
 
 func udpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
 	if len(params) != 2 {
-		return nil, []any{1, "Invalid number of parameters, expected expected udpConnId, payload"}
+		return nil, []any{1, "Invalid number of parameters, expected udpConnId, payload"}
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
