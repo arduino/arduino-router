@@ -297,11 +297,14 @@ func TestUDPNetworkAPI(t *testing.T) {
 		require.Nil(t, err)
 		require.Equal(t, []any{3, "127.0.0.1", 9800}, res)
 
-		res2, err := udpRead(ctx, nil, []any{conn2, 100})
+		// A partial read of a packet is allowed
+		res2, err := udpRead(ctx, nil, []any{conn2, 2})
 		require.Nil(t, err)
-		require.Equal(t, []uint8("One"), res2)
+		require.Equal(t, []uint8("On"), res2)
 	}
 	{
+		// Even if the previous packet was only partially read,
+		// the next packet can be received
 		res, err := udpAwaitPacket(ctx, nil, []any{conn2})
 		require.Nil(t, err)
 		require.Equal(t, []any{3, "127.0.0.1", 9800}, res)

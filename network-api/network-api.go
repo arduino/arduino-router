@@ -568,7 +568,7 @@ func udpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_re
 			udpReadBuffers[id] = buffer[maxBytes:]
 			n = maxBytes
 		} else {
-			udpReadBuffers[id] = nil
+			delete(udpReadBuffers, id)
 		}
 	}
 	lock.Unlock()
