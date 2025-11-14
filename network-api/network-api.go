@@ -50,7 +50,7 @@ func Register(router *msgpackrouter.Router) {
 	_ = router.RegisterMethod("udp/beginPacket", udpBeginPacket)
 	_ = router.RegisterMethod("udp/write", udpWrite)
 	_ = router.RegisterMethod("udp/endPacket", udpEndPacket)
-	_ = router.RegisterMethod("udp/awaitRead", udpAwaitRead)
+	_ = router.RegisterMethod("udp/awaitPacket", udpAwaitPacket)
 	_ = router.RegisterMethod("udp/read", udpRead)
 	_ = router.RegisterMethod("udp/close", udpClose)
 }
@@ -475,7 +475,7 @@ func udpEndPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any)
 	}
 }
 
-func udpAwaitRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func udpAwaitPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
 	if len(params) != 1 && len(params) != 2 {
 		return nil, []any{1, "Invalid number of parameters, expected (UDP connection ID[, optional timeout in ms])"}
 	}

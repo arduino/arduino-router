@@ -259,7 +259,7 @@ func TestUDPNetworkAPI(t *testing.T) {
 		require.Equal(t, 5, res)
 	}
 	{
-		res, err := udpAwaitRead(ctx, nil, []any{conn2})
+		res, err := udpAwaitPacket(ctx, nil, []any{conn2})
 		require.Nil(t, err)
 		require.Equal(t, []any{5, "127.0.0.1", 9800}, res)
 
@@ -293,7 +293,7 @@ func TestUDPNetworkAPI(t *testing.T) {
 		require.Equal(t, 3, res)
 	}
 	{
-		res, err := udpAwaitRead(ctx, nil, []any{conn2})
+		res, err := udpAwaitPacket(ctx, nil, []any{conn2})
 		require.Nil(t, err)
 		require.Equal(t, []any{3, "127.0.0.1", 9800}, res)
 
@@ -302,7 +302,7 @@ func TestUDPNetworkAPI(t *testing.T) {
 		require.Equal(t, []uint8("One"), res2)
 	}
 	{
-		res, err := udpAwaitRead(ctx, nil, []any{conn2})
+		res, err := udpAwaitPacket(ctx, nil, []any{conn2})
 		require.Nil(t, err)
 		require.Equal(t, []any{3, "127.0.0.1", 9800}, res)
 
@@ -337,7 +337,7 @@ func TestUDPNetworkUnboundClientAPI(t *testing.T) {
 		require.Equal(t, 5, res)
 	}
 	{
-		res, err := udpAwaitRead(ctx, nil, []any{conn2})
+		res, err := udpAwaitPacket(ctx, nil, []any{conn2})
 		require.Nil(t, err)
 		require.Equal(t, 5, res.([]any)[0])
 
@@ -360,7 +360,7 @@ func TestUDPNetworkUnboundClientAPI(t *testing.T) {
 		require.Equal(t, 3, res)
 	}
 	{
-		res, err := udpAwaitRead(ctx, nil, []any{conn2})
+		res, err := udpAwaitPacket(ctx, nil, []any{conn2})
 		require.Nil(t, err)
 		require.Equal(t, 3, res.([]any)[0])
 
@@ -369,7 +369,7 @@ func TestUDPNetworkUnboundClientAPI(t *testing.T) {
 		require.Equal(t, []uint8("One"), res2)
 	}
 	{
-		res, err := udpAwaitRead(ctx, nil, []any{conn2})
+		res, err := udpAwaitPacket(ctx, nil, []any{conn2})
 		require.Nil(t, err)
 		require.Equal(t, 3, res.([]any)[0])
 
@@ -387,13 +387,13 @@ func TestUDPNetworkUnboundClientAPI(t *testing.T) {
 	}()
 	{
 		start := time.Now()
-		res, err := udpAwaitRead(ctx, nil, []any{conn2, 10})
+		res, err := udpAwaitPacket(ctx, nil, []any{conn2, 10})
 		require.Less(t, time.Since(start), 20*time.Millisecond)
 		require.Equal(t, []any{5, "Timeout"}, err)
 		require.Nil(t, res)
 	}
 	{
-		res, err := udpAwaitRead(ctx, nil, []any{conn2, 0})
+		res, err := udpAwaitPacket(ctx, nil, []any{conn2, 0})
 		require.Nil(t, err)
 		require.Equal(t, 5, res.([]any)[0])
 
