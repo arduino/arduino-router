@@ -335,7 +335,13 @@ func TestUDPNetworkUnboundClientAPI(t *testing.T) {
 	require.NotEqual(t, conn1, conn2)
 
 	{
-		res, err := udpWrite(ctx, nil, []any{conn1, "127.0.0.1", 9901, []byte("Hello")})
+		res, err := udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9901})
+		require.Nil(t, err)
+		require.True(t, res.(bool))
+		res, err = udpWrite(ctx, nil, []any{conn1, []byte("Hello")})
+		require.Nil(t, err)
+		require.Equal(t, 5, res)
+		res, err = udpEndPacket(ctx, nil, []any{conn1})
 		require.Nil(t, err)
 		require.Equal(t, 5, res)
 	}
@@ -353,12 +359,24 @@ func TestUDPNetworkUnboundClientAPI(t *testing.T) {
 		require.Equal(t, []uint8("llo"), res2)
 	}
 	{
-		res, err := udpWrite(ctx, nil, []any{conn1, "127.0.0.1", 9901, []byte("One")})
+		res, err := udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9901})
+		require.Nil(t, err)
+		require.True(t, res.(bool))
+		res, err = udpWrite(ctx, nil, []any{conn1, []byte("One")})
+		require.Nil(t, err)
+		require.Equal(t, 3, res)
+		res, err = udpEndPacket(ctx, nil, []any{conn1})
 		require.Nil(t, err)
 		require.Equal(t, 3, res)
 	}
 	{
-		res, err := udpWrite(ctx, nil, []any{conn1, "127.0.0.1", 9901, []byte("Two")})
+		res, err := udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9901})
+		require.Nil(t, err)
+		require.True(t, res.(bool))
+		res, err = udpWrite(ctx, nil, []any{conn1, []byte("Two")})
+		require.Nil(t, err)
+		require.Equal(t, 3, res)
+		res, err = udpEndPacket(ctx, nil, []any{conn1})
 		require.Nil(t, err)
 		require.Equal(t, 3, res)
 	}
@@ -384,7 +402,13 @@ func TestUDPNetworkUnboundClientAPI(t *testing.T) {
 	// Check timeouts
 	go func() {
 		time.Sleep(200 * time.Millisecond)
-		res, err := udpWrite(ctx, nil, []any{conn1, "127.0.0.1", 9901, []byte("Three")})
+		res, err := udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9901})
+		require.Nil(t, err)
+		require.True(t, res.(bool))
+		res, err = udpWrite(ctx, nil, []any{conn1, []byte("Three")})
+		require.Nil(t, err)
+		require.Equal(t, 5, res)
+		res, err = udpEndPacket(ctx, nil, []any{conn1})
 		require.Nil(t, err)
 		require.Equal(t, 5, res)
 	}()
