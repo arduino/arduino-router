@@ -248,7 +248,13 @@ func TestUDPNetworkAPI(t *testing.T) {
 	require.NotEqual(t, conn1, conn2)
 
 	{
-		res, err := udpWrite(ctx, nil, []any{conn1, "127.0.0.1", 9900, []byte("Hello")})
+		res, err := udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9900})
+		require.Nil(t, err)
+		require.True(t, res.(bool))
+		res, err = udpWrite(ctx, nil, []any{conn1, []byte("Hello")})
+		require.Nil(t, err)
+		require.Equal(t, 5, res)
+		res, err = udpEndPacket(ctx, nil, []any{conn1})
 		require.Nil(t, err)
 		require.Equal(t, 5, res)
 	}
@@ -262,12 +268,27 @@ func TestUDPNetworkAPI(t *testing.T) {
 		require.Equal(t, []uint8("Hello"), res2)
 	}
 	{
-		res, err := udpWrite(ctx, nil, []any{conn1, "127.0.0.1", 9900, []byte("One")})
+		res, err := udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9900})
+		require.Nil(t, err)
+		require.True(t, res.(bool))
+		res, err = udpWrite(ctx, nil, []any{conn1, []byte("On")})
+		require.Nil(t, err)
+		require.Equal(t, 2, res)
+		res, err = udpWrite(ctx, nil, []any{conn1, []byte("e")})
+		require.Nil(t, err)
+		require.Equal(t, 1, res)
+		res, err = udpEndPacket(ctx, nil, []any{conn1})
 		require.Nil(t, err)
 		require.Equal(t, 3, res)
 	}
 	{
-		res, err := udpWrite(ctx, nil, []any{conn1, "127.0.0.1", 9900, []byte("Two")})
+		res, err := udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9900})
+		require.Nil(t, err)
+		require.True(t, res.(bool))
+		res, err = udpWrite(ctx, nil, []any{conn1, []byte("Two")})
+		require.Nil(t, err)
+		require.Equal(t, 3, res)
+		res, err = udpEndPacket(ctx, nil, []any{conn1})
 		require.Nil(t, err)
 		require.Equal(t, 3, res)
 	}
