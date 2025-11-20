@@ -85,7 +85,7 @@ func main() {
 		Use:  "version",
 		Long: "Print version information",
 		Run: func(cmd *cobra.Command, args []string) {
-			fmt.Println("Arduino Router v" + Version)
+			fmt.Println("Arduino Router " + Version)
 		},
 	})
 
