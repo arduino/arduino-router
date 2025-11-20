@@ -29,11 +29,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/arduino/arduino-router/hciapi"
-	"github.com/arduino/arduino-router/monitorapi"
-	"github.com/arduino/arduino-router/msgpackrouter"
+	"github.com/arduino/arduino-router/internal/hciapi"
+	"github.com/arduino/arduino-router/internal/monitorapi"
+	"github.com/arduino/arduino-router/internal/msgpackrouter"
+	networkapi "github.com/arduino/arduino-router/internal/network-api"
 	"github.com/arduino/arduino-router/msgpackrpc"
-	networkapi "github.com/arduino/arduino-router/network-api"
 
 	"github.com/spf13/cobra"
 	"go.bug.st/f"
