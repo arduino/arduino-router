@@ -16,7 +16,7 @@ To purchase a commercial license, send an email to license@arduino.cc.
 THIRD PARTY NOTICES
 
 *****
-github.com/creack/goselect@v0.1.2
+github.com/creack/goselect@v0.1.3
 
 The MIT License (MIT)
 
@@ -323,7 +323,7 @@ Apache License
 Cobra is released under the Apache 2.0 license. See [LICENSE.txt](LICENSE.txt)
 
 *****
-github.com/spf13/pflag@v1.0.9
+github.com/spf13/pflag@v1.0.10
 
 Copyright (c) 2012 Alex Ogier. All rights reserved.
 Copyright (c) 2012 The Go Authors. All rights reserved.
@@ -619,7 +619,7 @@ This software is released under the [BSD 3-clause license].
 [BSD 3-clause license]: https://github.com/bugst/go-serial/blob/master/LICENSE
 
 *****
-golang.org/x/sys/unix@v0.37.0
+golang.org/x/sys/unix@v0.38.0
 
 Copyright 2009 The Go Authors.
 
