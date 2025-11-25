@@ -24,6 +24,7 @@ import (
 	"strings"
 
 	"github.com/arduino/arduino-router/msgpackrpc"
+
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
 )
@@ -67,24 +68,22 @@ func main() {
 			yamlEncoder := yaml.NewEncoder(os.Stdout)
 			yamlEncoder.SetIndent(2)
 			fmt.Println("Sending parameters:")
-			yamlEncoder.Encode(args)
+			_ = yamlEncoder.Encode(args)
 
 			// Perfom request send
 			if rpcResp, rpcErr, err := send(server, cliArgs[0], args.([]any), notification); err != nil {
 				fmt.Println("Error sending request:", err)
 				os.Exit(1)
-			} else {
-				if !notification {
-					yamlEncoder := yaml.NewEncoder(os.Stdout)
-					yamlEncoder.SetIndent(2)
-					if rpcErr != nil {
-						fmt.Println("Got RPC error response:")
-						yamlEncoder.Encode(rpcErr)
-					}
-					if rpcResp != nil {
-						fmt.Println("Got RPC response:")
-						yamlEncoder.Encode(rpcResp)
-					}
+			} else if !notification {
+				yamlEncoder := yaml.NewEncoder(os.Stdout)
+				yamlEncoder.SetIndent(2)
+				if rpcErr != nil {
+					fmt.Println("Got RPC error response:")
+					_ = yamlEncoder.Encode(rpcErr)
+				}
+				if rpcResp != nil {
+					fmt.Println("Got RPC response:")
+					_ = yamlEncoder.Encode(rpcResp)
 				}
 			}
 		},
