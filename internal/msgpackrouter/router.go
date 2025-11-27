@@ -81,7 +81,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 	defer conn.Close()
 
 	var msgpackconn *msgpackrpc.Connection
-	msgpackconn = msgpackrpc.NewConnection(conn, conn,
+	msgpackconn = msgpackrpc.NewConnectionWithMaxWorkers(conn, conn,
 		func(ctx context.Context, _ msgpackrpc.FunctionLogger, method string, params []any) (_result any, _err any) {
 			// This handler is called when a request is received from the client
 			slog.Debug("Received request", "method", method, "params", params)
@@ -167,6 +167,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			}
 			slog.Error("Error in connection", "err", err)
 		},
+		r.sendQueueSize,
 	)
 
 	msgpackconn.Run()
