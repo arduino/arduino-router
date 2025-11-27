@@ -291,6 +291,8 @@ func (c *Connection) decodeRpcPacket(in *msgpack.Decoder) (rpcPacket, error) {
 
 func (c *Connection) Run() {
 	in := msgpack.NewDecoder(c.in)
+	in.SetMapDecoder(func(dec *msgpack.Decoder) (any, error) { return dec.DecodeUntypedMap() })
+
 	for {
 		start := time.Now()
 		packet, err := c.decodeRpcPacket(in)
