@@ -155,7 +155,7 @@ func startRouter(cfg Config) error {
 	}
 
 	// Run router
-	router := msgpackrouter.New()
+	router := msgpackrouter.New(0)
 
 	// Register TCP network API methods
 	networkapi.Register(router)
