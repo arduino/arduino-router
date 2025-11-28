@@ -129,6 +129,13 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			// This handler is called when a notification is received from the client
 			slog.Debug("Received notification", "method", method, "params", params)
 
+			// Check if the method is an internal method
+			if handler, ok := r.routesInternal[method]; ok {
+				// call the internal method handler (since it's a notification, discard the result)
+				_, _ = handler(context.Background(), msgpackconn, params)
+				return
+			}
+
 			// Check if the method is registered
 			client, ok := r.getConnectionForMethod(method)
 			if !ok {
