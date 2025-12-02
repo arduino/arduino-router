@@ -92,7 +92,7 @@ func TestBasicRouterFunctionality(t *testing.T) {
 	})
 	go cl2.Run()
 
-	router := msgpackrouter.New()
+	router := msgpackrouter.New(0)
 	router.Accept(ch1b)
 	router.Accept(ch2b)
 
@@ -159,4 +159,56 @@ func TestBasicRouterFunctionality(t *testing.T) {
 	require.Contains(t, cl1Notifications.String(), "notification: ping [a 4 false]")
 	require.Contains(t, cl1Notifications.String(), "notification: ping [b 14 true true]")
 	cl1NotificationsMux.Unlock()
+}
+
+func TestMessageForwarderCongestionControl(t *testing.T) {
+	// Test parameters
+	queueSize := 5
+	msgLatency := 100 * time.Millisecond
+	// Run a batch of 20 requests, and expect them to take more than 400 ms
+	// in total because the router should throttle requests in batch of 5.
+	batchSize := queueSize * 4
+	expectedLatency := msgLatency * time.Duration(batchSize/queueSize)
+
+	// Make a client that simulates a slow response
+	ch1a, ch1b := newFullPipe()
+	cl1 := msgpackrpc.NewConnection(ch1a, ch1a, func(ctx context.Context, logger msgpackrpc.FunctionLogger, method string, params []any) (_result any, _err any) {
+		time.Sleep(msgLatency)
+		return true, nil
+	}, nil, nil)
+	go cl1.Run()
+
+	// Make a second client to send requests, without any delay
+	ch2a, ch2b := newFullPipe()
+	cl2 := msgpackrpc.NewConnection(ch2a, ch2a, nil, nil, nil)
+	go cl2.Run()
+
+	// Setup router
+	router := msgpackrouter.New(queueSize) // max 5 pending messages per connection
+	router.Accept(ch1b)
+	router.Accept(ch2b)
+
+	{
+		// Register a method on the first client
+		result, reqErr, err := cl1.SendRequest(context.Background(), "$/register", []any{"test"})
+		require.Equal(t, true, result)
+		require.Nil(t, reqErr)
+		require.NoError(t, err)
+	}
+
+	// Run batch of requests from cl2 to cl1
+	start := time.Now()
+	var wg sync.WaitGroup
+	for range batchSize {
+		wg.Go(func() {
+			_, _, err := cl2.SendRequest(t.Context(), "test", []any{})
+			require.NoError(t, err)
+		})
+	}
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	// Check that the elapsed time is greater than expectedLatency
+	fmt.Println("Elapsed time for requests:", elapsed)
+	require.Greater(t, elapsed, expectedLatency, "Expected elapsed time to be greater than %s", expectedLatency)
 }

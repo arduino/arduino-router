@@ -52,6 +52,8 @@ type Connection struct {
 	activeOutRequests      map[MessageID]*outRequest
 	activeOutRequestsMutex sync.Mutex
 	lastOutRequestsIndex   atomic.Uint32
+
+	workerSlots chan bool
 }
 
 type inRequest struct {
@@ -79,8 +81,14 @@ type NotificationHandler func(logger FunctionLogger, method string, params []any
 // sending a request or notification.
 type ErrorHandler func(error)
 
-// NewConnection starts a new
+// NewConnection creates a new MessagePack-RPC Connection handler.
 func NewConnection(in io.ReadCloser, out io.WriteCloser, requestHandler RequestHandler, notificationHandler NotificationHandler, errorHandler ErrorHandler) *Connection {
+	return NewConnectionWithMaxWorkers(in, out, requestHandler, notificationHandler, errorHandler, 0)
+}
+
+// NewConnectionWithMaxWorkers creates a new MessagePack-RPC Connection handler
+// with a specified maximum number of worker goroutines to handle incoming requests.
+func NewConnectionWithMaxWorkers(in io.ReadCloser, out io.WriteCloser, requestHandler RequestHandler, notificationHandler NotificationHandler, errorHandler ErrorHandler, maxWorkers int) *Connection {
 	outEncoder := msgpack.NewEncoder(out)
 	outEncoder.UseCompactInts(true)
 	if requestHandler == nil {
@@ -109,7 +117,22 @@ func NewConnection(in io.ReadCloser, out io.WriteCloser, requestHandler RequestH
 		activeOutRequests:   map[MessageID]*outRequest{},
 		logger:              NullLogger{},
 	}
+	if maxWorkers > 0 {
+		conn.workerSlots = make(chan bool, maxWorkers)
+	}
 	return conn
+}
+
+func (c *Connection) startWorker(cb func()) {
+	if c.workerSlots == nil {
+		go cb()
+		return
+	}
+	c.workerSlots <- true
+	go func() {
+		defer func() { <-c.workerSlots }()
+		cb()
+	}()
 }
 
 func (c *Connection) SetLogger(l Logger) {
@@ -215,7 +238,7 @@ func (c *Connection) handleIncomingRequest(id MessageID, method string, params [
 	logger := c.logger.LogIncomingRequest(id, method, params)
 	c.loggerMutex.Unlock()
 
-	go func() {
+	c.startWorker(func() {
 		reqResult, reqError := c.requestHandler(ctx, logger, method, params)
 
 		var existing *inRequest
@@ -238,7 +261,7 @@ func (c *Connection) handleIncomingRequest(id MessageID, method string, params [
 			c.errorHandler(fmt.Errorf("error sending response: %w", err))
 			c.Close()
 		}
-	}()
+	})
 }
 
 func (c *Connection) handleIncomingNotification(method string, params []any) {
@@ -261,7 +284,9 @@ func (c *Connection) handleIncomingNotification(method string, params []any) {
 	logger := c.logger.LogIncomingNotification(method, params)
 	c.loggerMutex.Unlock()
 
-	go c.notificationHandler(logger, method, params)
+	c.startWorker(func() {
+		c.notificationHandler(logger, method, params)
+	})
 }
 
 func (c *Connection) handleIncomingResponse(id MessageID, reqError any, reqResult any) {
