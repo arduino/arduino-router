@@ -7,9 +7,8 @@ Requires=
 [Service]
 # Put the micro in a ready state.
 ExecStartPre=-/usr/bin/gpioset -c /dev/gpiochip1 -t0 37=0
-ExecStart=/usr/bin/arduino-router --unix-port /var/run/arduino-router.sock --serial-port /dev/ttyHS1 --serial-baudrate 115200
-# End the boot animation after the router is started.
-ExecStartPost=/usr/bin/gpioset -c /dev/gpiochip1 -t0 70=1
+# Launch router and end the boot animation after the router is started (--after-start).
+ExecStart=/usr/bin/arduino-router --unix-port /var/run/arduino-router.sock --serial-port /dev/ttyHS1 --serial-baudrate 115200 --after-start "/usr/bin/gpioset -c /dev/gpiochip1 -t0 70=1"
 StandardOutput=journal
 StandardError=journal
 Restart=always

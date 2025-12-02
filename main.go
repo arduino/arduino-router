@@ -25,6 +25,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -35,6 +36,7 @@ import (
 	networkapi "github.com/arduino/arduino-router/internal/network-api"
 	"github.com/arduino/arduino-router/msgpackrpc"
 
+	"github.com/arduino/go-paths-helper"
 	"github.com/spf13/cobra"
 	"go.bug.st/f"
 	"go.bug.st/serial"
@@ -51,6 +53,7 @@ type Config struct {
 	SerialPortAddr  string
 	SerialBaudRate  int
 	MonitorPortAddr string
+	StartCallback   string
 }
 
 func main() {
@@ -80,6 +83,7 @@ func main() {
 	cmd.Flags().StringVarP(&cfg.SerialPortAddr, "serial-port", "p", "", "Serial port address")
 	cmd.Flags().IntVarP(&cfg.SerialBaudRate, "serial-baudrate", "b", 115200, "Serial port baud rate")
 	cmd.Flags().StringVarP(&cfg.MonitorPortAddr, "monitor-port", "m", "127.0.0.1:7500", "Listening port for MCU monitor proxy")
+	cmd.Flags().StringVar(&cfg.StartCallback, "after-start", "", "Command to execute when the router has successfully completed startup")
 
 	cmd.AddCommand(&cobra.Command{
 		Use:  "version",
@@ -224,6 +228,10 @@ func startRouter(cfg Config) error {
 			return true, nil
 		})
 		f.Assert(err == nil, "Failed to register $/serial/close method")
+
+		var started sync.WaitGroup
+		started.Add(1)
+		initialized := sync.OnceFunc(started.Done)
 		go func() {
 			for {
 				serialOpened.L.Lock()
@@ -246,6 +254,7 @@ func startRouter(cfg Config) error {
 					time.Sleep(5 * time.Second)
 					continue
 				}
+				initialized()
 				slog.Info("Opened serial connection", "serial", cfg.SerialPortAddr)
 				wr := &MsgpackDebugStream{Name: cfg.SerialPortAddr, Upstream: serialPort}
 
@@ -262,6 +271,7 @@ func startRouter(cfg Config) error {
 				<-routerExit
 			}
 		}()
+		started.Wait()
 	}
 
 	// Wait for incoming connections on all listeners
@@ -278,6 +288,20 @@ func startRouter(cfg Config) error {
 				router.Accept(conn)
 			}
 		}()
+	}
+
+	// Execute start callback if specified
+	if cfg.StartCallback != "" {
+		slog.Info("Executing start callback", "cmd", cfg.StartCallback)
+		cb, err := paths.NewProcess(nil, strings.Split(cfg.StartCallback, " ")...)
+		if err != nil {
+			slog.Error("Failed to start callback process", "err", err)
+			return err
+		}
+		if err := cb.Run(); err != nil {
+			slog.Error("Start callback process failed", "err", err)
+			return err
+		}
 	}
 
 	// Sleep forever until interrupted
