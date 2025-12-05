@@ -3,5 +3,5 @@ Version: $VERSION
 Architecture: $ARCH
 Maintainer: arduino <support@arduino.cc>
 Description: Arduino application router
-Depends: socat, arduino-firmware-radio
+Depends: socat, arduino-unoq-radio-firmware
 
