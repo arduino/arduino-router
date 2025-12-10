@@ -33,13 +33,24 @@ type Router struct {
 	routesLock     sync.Mutex
 	routes         map[string]*msgpackrpc.Connection
 	routesInternal map[string]RouterRequestHandler
+	sendQueueSize  int
 }
 
-func New() *Router {
+func New(perConnSendQueueSize int) *Router {
 	return &Router{
 		routes:         make(map[string]*msgpackrpc.Connection),
 		routesInternal: make(map[string]RouterRequestHandler),
+		sendQueueSize:  perConnSendQueueSize,
 	}
+}
+
+// SetSendQueueSize sets the size of the send queue for each connection.
+// Only new connections will be affected by this change, existing connections
+// will keep their current send queue size.
+func (r *Router) SetSendQueueSize(size int) {
+	r.routesLock.Lock()
+	defer r.routesLock.Unlock()
+	r.sendQueueSize = size
 }
 
 func (r *Router) Accept(conn io.ReadWriteCloser) <-chan struct{} {
@@ -70,7 +81,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 	defer conn.Close()
 
 	var msgpackconn *msgpackrpc.Connection
-	msgpackconn = msgpackrpc.NewConnection(conn, conn,
+	msgpackconn = msgpackrpc.NewConnectionWithMaxWorkers(conn, conn,
 		func(ctx context.Context, _ msgpackrpc.FunctionLogger, method string, params []any) (_result any, _err any) {
 			// This handler is called when a request is received from the client
 			slog.Debug("Received request", "method", method, "params", params)
@@ -156,6 +167,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			}
 			slog.Error("Error in connection", "err", err)
 		},
+		r.sendQueueSize,
 	)
 
 	msgpackconn.Run()
