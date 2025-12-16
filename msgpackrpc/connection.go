@@ -53,8 +53,10 @@ type Connection struct {
 	activeOutRequestsMutex sync.Mutex
 	lastOutRequestsIndex   atomic.Uint32
 
-	workerSlots chan bool
+	workerSlots chan token
 }
+
+type token struct{}
 
 type inRequest struct {
 	cancel func()
@@ -118,7 +120,7 @@ func NewConnectionWithMaxWorkers(in io.ReadCloser, out io.WriteCloser, requestHa
 		logger:              NullLogger{},
 	}
 	if maxWorkers > 0 {
-		conn.workerSlots = make(chan bool, maxWorkers)
+		conn.workerSlots = make(chan token, maxWorkers)
 	}
 	return conn
 }
@@ -128,7 +130,7 @@ func (c *Connection) startWorker(cb func()) {
 		go cb()
 		return
 	}
-	c.workerSlots <- true
+	c.workerSlots <- token{}
 	go func() {
 		defer func() { <-c.workerSlots }()
 		cb()
