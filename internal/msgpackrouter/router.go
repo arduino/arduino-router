@@ -33,24 +33,26 @@ type Router struct {
 	routesLock     sync.Mutex
 	routes         map[string]*msgpackrpc.Connection
 	routesInternal map[string]RouterRequestHandler
-	sendQueueSize  int
+	sendMaxWorkers int
 }
 
-func New(perConnSendQueueSize int) *Router {
+func New(perConnMaxWorkers int) *Router {
 	return &Router{
 		routes:         make(map[string]*msgpackrpc.Connection),
 		routesInternal: make(map[string]RouterRequestHandler),
-		sendQueueSize:  perConnSendQueueSize,
+		sendMaxWorkers: perConnMaxWorkers,
 	}
 }
 
-// SetSendQueueSize sets the size of the send queue for each connection.
+// SetSendMaxWorkers sets the maximum number of workers for sending on each connection,
+// this value limits the number of concurrent requests that can be sent on each connection.
+// A value of 0 means unlimited workers.
 // Only new connections will be affected by this change, existing connections
-// will keep their current send queue size.
-func (r *Router) SetSendQueueSize(size int) {
+// will keep their current sendMaxWorkers value.
+func (r *Router) SetSendMaxWorkers(size int) {
 	r.routesLock.Lock()
 	defer r.routesLock.Unlock()
-	r.sendQueueSize = size
+	r.sendMaxWorkers = size
 }
 
 func (r *Router) Accept(conn io.ReadWriteCloser) <-chan struct{} {
@@ -167,7 +169,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			}
 			slog.Error("Error in connection", "err", err)
 		},
-		r.sendQueueSize,
+		r.sendMaxWorkers,
 	)
 
 	msgpackconn.Run()
