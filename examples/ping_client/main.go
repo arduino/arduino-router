@@ -34,7 +34,7 @@ func main() {
 	go conn.Run()
 
 	// Client
-	reqResult, reqError, err := conn.SendRequest(context.Background(), "ping", []any{"HELLO", 1, true, 5.0})
+	reqResult, reqError, err := conn.SendRequest(context.Background(), "ping", "HELLO", 1, true, 5.0)
 	if err != nil {
 		panic(err)
 	}

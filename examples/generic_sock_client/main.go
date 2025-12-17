@@ -59,7 +59,7 @@ func main() {
 			args = append(args, arg)
 		}
 	}
-	reqResult, reqError, err := conn.SendRequest(context.Background(), method, args)
+	reqResult, reqError, err := conn.SendRequest(context.Background(), method, args...)
 	if err != nil {
 		fmt.Println("Error sending request:", err)
 		return

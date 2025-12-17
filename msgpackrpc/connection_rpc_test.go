@@ -130,7 +130,7 @@ func TestRPCConnection(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			respRes, respErr, err := conn.SendRequest(t.Context(), "helloworld", []any{true})
+			respRes, respErr, err := conn.SendRequest(t.Context(), "helloworld", true)
 			require.NoError(t, err)
 			require.Nil(t, respErr)
 			require.Equal(t, map[string]any{"fakedata": int8(99)}, respRes)

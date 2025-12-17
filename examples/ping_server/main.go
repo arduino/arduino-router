@@ -50,7 +50,7 @@ func main() {
 
 	// Register the ping method
 	ctx := context.Background()
-	_, reqErr, err := conn.SendRequest(ctx, "$/register", []any{"ping"})
+	_, reqErr, err := conn.SendRequest(ctx, "$/register", "ping")
 	if err != nil {
 		slog.Error("Failed to send register request for ping method", "err", reqErr)
 		return

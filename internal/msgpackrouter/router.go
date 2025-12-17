@@ -129,7 +129,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			}
 
 			// Forward the call to the registered client
-			reqResult, reqError, err := client.SendRequest(ctx, method, params)
+			reqResult, reqError, err := client.SendRequest(ctx, method, params...)
 			if err != nil {
 				slog.Error("Failed to send request", "method", method, "err", err)
 				return nil, routerError(ErrCodeFailedToSendRequests, fmt.Sprintf("failed to send request: %s", err))
@@ -157,7 +157,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			}
 
 			// Forward the notification to the registered client
-			if err := client.SendNotification(method, params); err != nil {
+			if err := client.SendNotification(method, params...); err != nil {
 				slog.Error("Failed to send notification", "method", method, "err", err)
 				return
 			}

@@ -327,7 +327,10 @@ func (c *Connection) Close() {
 	_ = c.out.Close()
 }
 
-func (c *Connection) SendRequest(ctx context.Context, method string, params []any) (reqResult any, reqError any, err error) {
+func (c *Connection) SendRequest(ctx context.Context, method string, params ...any) (reqResult any, reqError any, err error) {
+	if params == nil {
+		params = []any{}
+	}
 	id := MessageID(c.lastOutRequestsIndex.Add(1))
 
 	c.loggerMutex.Lock()
@@ -364,7 +367,7 @@ func (c *Connection) SendRequest(ctx context.Context, method string, params []an
 			c.logger.LogOutgoingCancelRequest(id)
 			c.loggerMutex.Unlock()
 
-			_ = c.SendNotification("$/cancelRequest", []any{id}) // ignore error (it won't matter anyway)
+			_ = c.SendNotification("$/cancelRequest", id) // ignore error (it won't matter anyway)
 		}
 
 		// After cancelation wait for result...
@@ -378,7 +381,11 @@ func (c *Connection) SendRequest(ctx context.Context, method string, params []an
 	return result.reqResult, result.reqError, nil
 }
 
-func (c *Connection) SendNotification(method string, params []any) error {
+func (c *Connection) SendNotification(method string, params ...any) error {
+	if params == nil {
+		params = []any{}
+	}
+
 	c.loggerMutex.Lock()
 	c.logger.LogOutgoingNotification(method, params)
 	c.loggerMutex.Unlock()

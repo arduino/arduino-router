@@ -98,59 +98,59 @@ func TestBasicRouterFunctionality(t *testing.T) {
 
 	{
 		// Register a method on the first client
-		result, reqErr, err := cl1.SendRequest(context.Background(), "$/register", []any{"ping"})
+		result, reqErr, err := cl1.SendRequest(context.Background(), "$/register", "ping")
 		require.Equal(t, true, result)
 		require.Nil(t, reqErr)
 		require.NoError(t, err)
 	}
 	{
 		// Try to re-register the same method
-		result, reqErr, err := cl1.SendRequest(context.Background(), "$/register", []any{"ping"})
+		result, reqErr, err := cl1.SendRequest(context.Background(), "$/register", "ping")
 		require.Nil(t, result)
 		require.Equal(t, []any{int8(msgpackrouter.ErrCodeRouteAlreadyExists), "route already exists: ping"}, reqErr)
 		require.NoError(t, err)
 	}
 	{
 		// Register a method on the second client
-		result, reqErr, err := cl2.SendRequest(context.Background(), "$/register", []any{"temperature"})
+		result, reqErr, err := cl2.SendRequest(context.Background(), "$/register", "temperature")
 		require.Equal(t, true, result)
 		require.Nil(t, reqErr)
 		require.NoError(t, err)
 	}
 	{
 		// Call from client2 the registered method on client1
-		result, reqErr, err := cl2.SendRequest(context.Background(), "ping", []any{"1", 2, true})
+		result, reqErr, err := cl2.SendRequest(context.Background(), "ping", "1", 2, true)
 		require.Equal(t, []any{"1", int8(2), true}, result)
 		require.Nil(t, reqErr)
 		require.NoError(t, err)
 	}
 	{
 		// Self-call from client1
-		result, reqErr, err := cl1.SendRequest(context.Background(), "ping", []any{"c", 12, false})
+		result, reqErr, err := cl1.SendRequest(context.Background(), "ping", "c", 12, false)
 		require.Equal(t, []any{"c", int8(12), false}, result)
 		require.Nil(t, reqErr)
 		require.NoError(t, err)
 	}
 	{
 		// Call from client2 an un-registered method
-		result, reqErr, err := cl2.SendRequest(context.Background(), "not-existent-method", []any{"1", 2, true})
+		result, reqErr, err := cl2.SendRequest(context.Background(), "not-existent-method", "1", 2, true)
 		require.Nil(t, result)
 		require.Equal(t, []any{int8(msgpackrouter.ErrCodeMethodNotAvailable), "method not-existent-method not available"}, reqErr)
 		require.NoError(t, err)
 	}
 	{
 		// Send notification to client1
-		err := cl2.SendNotification("ping", []any{"a", int16(4), false})
+		err := cl2.SendNotification("ping", "a", int16(4), false)
 		require.NoError(t, err)
 	}
 	{
 		// Send notification to unregistered method
-		err := cl2.SendNotification("notexistent", []any{"a", int16(4), false})
+		err := cl2.SendNotification("notexistent", "a", int16(4), false)
 		require.NoError(t, err)
 	}
 	{
 		// Self-send notification
-		err := cl1.SendNotification("ping", []any{"b", int16(14), true, true})
+		err := cl1.SendNotification("ping", "b", int16(14), true, true)
 		require.NoError(t, err)
 	}
 	time.Sleep(100 * time.Millisecond) // Give some time for the notifications to be processed
@@ -190,7 +190,7 @@ func TestMessageForwarderCongestionControl(t *testing.T) {
 
 	{
 		// Register a method on the first client
-		result, reqErr, err := cl1.SendRequest(context.Background(), "$/register", []any{"test"})
+		result, reqErr, err := cl1.SendRequest(context.Background(), "$/register", "test")
 		require.Equal(t, true, result)
 		require.Nil(t, reqErr)
 		require.NoError(t, err)
@@ -201,7 +201,7 @@ func TestMessageForwarderCongestionControl(t *testing.T) {
 	var wg sync.WaitGroup
 	for range batchSize {
 		wg.Go(func() {
-			_, _, err := cl2.SendRequest(t.Context(), "test", []any{})
+			_, _, err := cl2.SendRequest(t.Context(), "test")
 			require.NoError(t, err)
 		})
 	}
