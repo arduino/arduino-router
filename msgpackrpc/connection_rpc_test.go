@@ -1,6 +1,6 @@
 // This file is part of arduino-router
 //
-// Copyright 2025 ARDUINO SA (http://www.arduino.cc/)
+// Copyright (C) ARDUINO SRL (www.arduino.cc)
 //
 // This software is released under the GNU General Public License version 3,
 // which covers the main part of arduino-router
