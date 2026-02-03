@@ -45,6 +45,7 @@ type Connection struct {
 	errorHandler        ErrorHandler
 	requestHandler      RequestHandler
 	notificationHandler NotificationHandler
+	getKey              GetKey
 	logger              Logger
 	loggerMutex         sync.Mutex
 
@@ -123,6 +124,7 @@ func NewConnectionWithMaxWorkers(in io.ReadCloser, out io.WriteCloser, requestHa
 		outEncoder:          outEncoder,
 		requestHandler:      requestHandler,
 		notificationHandler: notificationHandler,
+		getKey:              getKey,
 		errorHandler:        errorHandler,
 		activeInRequests:    map[MessageID]*inRequest{},
 		activeOutRequests:   map[MessageID]*outRequest{},
@@ -137,8 +139,9 @@ func NewConnectionWithMaxWorkers(in io.ReadCloser, out io.WriteCloser, requestHa
 	return conn
 }
 
-func (c *Connection) startWorker(name string, cb func()) {
-	hash := sha256.Sum256([]byte(name))
+func (c *Connection) startWorker(method string, params []any, cb func(method string, params []any)) {
+	key := c.getKey(method, params)
+	hash := sha256.Sum256([]byte(key))
 	hashNum := new(big.Int).SetBytes(hash[:]).Uint64()
 
 	var slot *sync.Mutex
@@ -152,7 +155,7 @@ func (c *Connection) startWorker(name string, cb func()) {
 	slot.Lock()
 	go func() {
 		defer slot.Unlock()
-		cb()
+		cb(method, params)
 	}()
 }
 
@@ -259,7 +262,7 @@ func (c *Connection) handleIncomingRequest(id MessageID, method string, params [
 	logger := c.logger.LogIncomingRequest(id, method, params)
 	c.loggerMutex.Unlock()
 
-	c.startWorker(method, func() {
+	c.startWorker(method, params, func(method string, params []any) {
 		reqResult, reqError := c.requestHandler(ctx, logger, method, params)
 
 		var existing *inRequest
@@ -305,7 +308,7 @@ func (c *Connection) handleIncomingNotification(method string, params []any) {
 	logger := c.logger.LogIncomingNotification(method, params)
 	c.loggerMutex.Unlock()
 
-	c.startWorker(method, func() {
+	c.startWorker(method, params, func(method string, params []any) {
 		c.notificationHandler(logger, method, params)
 	})
 }
