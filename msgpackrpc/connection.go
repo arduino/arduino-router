@@ -17,8 +17,10 @@ package msgpackrpc
 
 import (
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io"
+	"math/big"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -53,7 +55,8 @@ type Connection struct {
 	activeOutRequestsMutex sync.Mutex
 	lastOutRequestsIndex   atomic.Uint32
 
-	workerSlots chan token
+	workerSlotsLock sync.Mutex
+	workerSlots     []*sync.Mutex
 }
 
 type token struct{}
@@ -120,19 +123,29 @@ func NewConnectionWithMaxWorkers(in io.ReadCloser, out io.WriteCloser, requestHa
 		logger:              NullLogger{},
 	}
 	if maxWorkers > 0 {
-		conn.workerSlots = make(chan token, maxWorkers)
+		conn.workerSlots = make([]*sync.Mutex, maxWorkers)
+		for i := range conn.workerSlots {
+			conn.workerSlots[i] = &sync.Mutex{}
+		}
 	}
 	return conn
 }
 
-func (c *Connection) startWorker(cb func()) {
-	if c.workerSlots == nil {
-		go cb()
-		return
-	}
-	c.workerSlots <- token{}
+func (c *Connection) startWorker(name string, cb func()) {
+	hash := sha256.Sum256([]byte(name))
+	hashNum := new(big.Int).SetBytes(hash[:]).Uint64()
+
+	var slot *sync.Mutex
+	func() {
+		c.workerSlotsLock.Lock()
+		defer c.workerSlotsLock.Unlock()
+		idx := hashNum % uint64(len(c.workerSlots))
+		slot = c.workerSlots[idx]
+	}()
+
+	slot.Lock()
 	go func() {
-		defer func() { <-c.workerSlots }()
+		defer slot.Unlock()
 		cb()
 	}()
 }
@@ -240,7 +253,7 @@ func (c *Connection) handleIncomingRequest(id MessageID, method string, params [
 	logger := c.logger.LogIncomingRequest(id, method, params)
 	c.loggerMutex.Unlock()
 
-	c.startWorker(func() {
+	c.startWorker(method, func() {
 		reqResult, reqError := c.requestHandler(ctx, logger, method, params)
 
 		var existing *inRequest
@@ -286,7 +299,7 @@ func (c *Connection) handleIncomingNotification(method string, params []any) {
 	logger := c.logger.LogIncomingNotification(method, params)
 	c.loggerMutex.Unlock()
 
-	c.startWorker(func() {
+	c.startWorker(method, func() {
 		c.notificationHandler(logger, method, params)
 	})
 }
