@@ -59,8 +59,6 @@ type Connection struct {
 	workerSlots     []*sync.Mutex
 }
 
-type token struct{}
-
 type inRequest struct {
 	cancel func()
 }

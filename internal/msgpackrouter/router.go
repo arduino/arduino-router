@@ -43,23 +43,15 @@ type Router struct {
 	sendMaxWorkers int
 }
 
-func New(perConnMaxWorkers int) *Router {
+func New(numWorker int) *Router {
+	if numWorker <= 0 {
+		numWorker = 25
+	}
 	return &Router{
 		routes:         make(map[string]*msgpackrpc.Connection),
 		routesInternal: make(map[string]routesInternalEntry),
-		sendMaxWorkers: perConnMaxWorkers,
+		sendMaxWorkers: numWorker,
 	}
-}
-
-// SetSendMaxWorkers sets the maximum number of workers for sending on each connection,
-// this value limits the number of concurrent requests that can be sent on each connection.
-// A value of 0 means unlimited workers.
-// Only new connections will be affected by this change, existing connections
-// will keep their current sendMaxWorkers value.
-func (r *Router) SetSendMaxWorkers(size int) {
-	r.routesLock.Lock()
-	defer r.routesLock.Unlock()
-	r.sendMaxWorkers = size
 }
 
 func (r *Router) Accept(conn io.ReadWriteCloser) <-chan struct{} {
