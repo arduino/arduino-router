@@ -34,26 +34,38 @@ import (
 
 // Register the Network API methods
 func Register(router *msgpackrouter.Router) {
-	_ = router.RegisterMethod("tcp/connect", tcpConnect)
+	withConnKey := func(name string) func(_ string, params []any) string {
+		return func(_ string, params []any) string {
+			return fmt.Sprintf("%s%v", name, params[0])
+		}
+	}
+	withMethodKey := func(name string) func(_ string, _ []any) string {
+		return func(_ string, _ []any) string {
+			return name
+		}
+	}
 
-	_ = router.RegisterMethod("tcp/listen", tcpListen)
-	_ = router.RegisterMethod("tcp/closeListener", tcpCloseListener)
+	_ = router.RegisterMethodWithKey("tcp/connect", withMethodKey("tcp"), tcpConnect)
 
-	_ = router.RegisterMethod("tcp/accept", tcpAccept)
-	_ = router.RegisterMethod("tcp/read", tcpRead)
-	_ = router.RegisterMethod("tcp/write", tcpWrite)
-	_ = router.RegisterMethod("tcp/close", tcpClose)
+	_ = router.RegisterMethodWithKey("tcp/listen", withMethodKey("tcp"), tcpListen)
+	_ = router.RegisterMethodWithKey("tcp/closeListener", withConnKey("tcp"), tcpCloseListener)
 
-	_ = router.RegisterMethod("tcp/connectSSL", tcpConnectSSL)
+	_ = router.RegisterMethodWithKey("tcp/accept", withConnKey("tcp"), tcpAccept)
+	_ = router.RegisterMethodWithKey("tcp/read", withConnKey("tcp"), tcpRead)
+	_ = router.RegisterMethodWithKey("tcp/write", withConnKey("tcp"), tcpWrite)
+	_ = router.RegisterMethodWithKey("tcp/close", withConnKey("tcp"), tcpClose)
 
-	_ = router.RegisterMethod("udp/connect", udpConnect)
-	_ = router.RegisterMethod("udp/beginPacket", udpBeginPacket)
-	_ = router.RegisterMethod("udp/write", udpWrite)
-	_ = router.RegisterMethod("udp/endPacket", udpEndPacket)
-	_ = router.RegisterMethod("udp/awaitPacket", udpAwaitPacket)
-	_ = router.RegisterMethod("udp/read", udpRead)
-	_ = router.RegisterMethod("udp/dropPacket", udpDropPacket)
-	_ = router.RegisterMethod("udp/close", udpClose)
+	_ = router.RegisterMethodWithKey("tcp/connectSSL", withMethodKey("tcp"), tcpConnectSSL)
+
+	_ = router.RegisterMethodWithKey("udp/connect", withMethodKey("udp"), udpConnect)
+
+	_ = router.RegisterMethodWithKey("udp/beginPacket", withConnKey("udp"), udpBeginPacket)
+	_ = router.RegisterMethodWithKey("udp/write", withConnKey("udp"), udpWrite)
+	_ = router.RegisterMethodWithKey("udp/endPacket", withConnKey("udp"), udpEndPacket)
+	_ = router.RegisterMethodWithKey("udp/awaitPacket", withConnKey("udp"), udpAwaitPacket)
+	_ = router.RegisterMethodWithKey("udp/read", withConnKey("udp"), udpRead)
+	_ = router.RegisterMethodWithKey("udp/dropPacket", withConnKey("udp"), udpDropPacket)
+	_ = router.RegisterMethodWithKey("udp/close", withConnKey("udp"), udpClose)
 }
 
 var lock sync.RWMutex

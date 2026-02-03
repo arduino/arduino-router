@@ -29,17 +29,24 @@ import (
 
 type RouterRequestHandler func(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (result any, err any)
 
+type GetKeyFunc func(method string, params []any) string
+
+type routesInternalEntry struct {
+	getKey  GetKeyFunc
+	handler RouterRequestHandler
+}
+
 type Router struct {
 	routesLock     sync.Mutex
 	routes         map[string]*msgpackrpc.Connection
-	routesInternal map[string]RouterRequestHandler
+	routesInternal map[string]routesInternalEntry
 	sendMaxWorkers int
 }
 
 func New(perConnMaxWorkers int) *Router {
 	return &Router{
 		routes:         make(map[string]*msgpackrpc.Connection),
-		routesInternal: make(map[string]RouterRequestHandler),
+		routesInternal: make(map[string]routesInternalEntry),
 		sendMaxWorkers: perConnMaxWorkers,
 	}
 }
@@ -64,7 +71,7 @@ func (r *Router) Accept(conn io.ReadWriteCloser) <-chan struct{} {
 	return res
 }
 
-func (r *Router) RegisterMethod(method string, handler RouterRequestHandler) error {
+func (r *Router) RegisterMethodWithKey(method string, getKey GetKeyFunc, handler RouterRequestHandler) error {
 	r.routesLock.Lock()
 	defer r.routesLock.Unlock()
 
@@ -74,9 +81,18 @@ func (r *Router) RegisterMethod(method string, handler RouterRequestHandler) err
 	}
 
 	// Register the method with the handler
-	r.routesInternal[method] = handler
+	r.routesInternal[method] = routesInternalEntry{
+		getKey:  getKey,
+		handler: handler,
+	}
 	slog.Info("Registered internal method", "method", method)
 	return nil
+}
+
+func (r *Router) RegisterMethod(method string, handler RouterRequestHandler) error {
+	return r.RegisterMethodWithKey(method, func(method string, params []any) string {
+		return method
+	}, handler)
 }
 
 func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
@@ -117,9 +133,9 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			}
 
 			// Check if the method is an internal method
-			if handler, ok := r.routesInternal[method]; ok {
+			if entry, ok := r.routesInternal[method]; ok {
 				// Call the internal method handler
-				return handler(ctx, msgpackconn, params)
+				return entry.handler(ctx, msgpackconn, params)
 			}
 
 			// Check if the method is registered
@@ -143,9 +159,9 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			slog.Debug("Received notification", "method", method, "params", params)
 
 			// Check if the method is an internal method
-			if handler, ok := r.routesInternal[method]; ok {
+			if entry, ok := r.routesInternal[method]; ok {
 				// call the internal method handler (since it's a notification, discard the result)
-				_, _ = handler(context.Background(), msgpackconn, params)
+				_, _ = entry.handler(context.Background(), msgpackconn, params)
 				return
 			}
 
@@ -170,6 +186,13 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			slog.Error("Error in connection", "err", err)
 		},
 		r.sendMaxWorkers,
+		func(method string, params []any) string {
+			// Check if the method is an internal method
+			if entry, ok := r.routesInternal[method]; ok {
+				return entry.getKey(method, params)
+			}
+			return method
+		},
 	)
 
 	msgpackconn.Run()

@@ -88,12 +88,20 @@ type ErrorHandler func(error)
 
 // NewConnection creates a new MessagePack-RPC Connection handler.
 func NewConnection(in io.ReadCloser, out io.WriteCloser, requestHandler RequestHandler, notificationHandler NotificationHandler, errorHandler ErrorHandler) *Connection {
-	return NewConnectionWithMaxWorkers(in, out, requestHandler, notificationHandler, errorHandler, 0)
+	return NewConnectionWithMaxWorkers(in, out, requestHandler, notificationHandler, errorHandler, 25, func(method string, params []any) string {
+		return method
+	})
 }
+
+type GetKey func(method string, params []any) string
 
 // NewConnectionWithMaxWorkers creates a new MessagePack-RPC Connection handler
 // with a specified maximum number of worker goroutines to handle incoming requests.
-func NewConnectionWithMaxWorkers(in io.ReadCloser, out io.WriteCloser, requestHandler RequestHandler, notificationHandler NotificationHandler, errorHandler ErrorHandler, maxWorkers int) *Connection {
+func NewConnectionWithMaxWorkers(in io.ReadCloser, out io.WriteCloser, requestHandler RequestHandler, notificationHandler NotificationHandler, errorHandler ErrorHandler, maxWorkers int, getKey GetKey) *Connection {
+	if maxWorkers <= 0 {
+		panic("maxWorkers must be greater than 0")
+	}
+
 	outEncoder := msgpack.NewEncoder(out)
 	outEncoder.UseCompactInts(true)
 	if requestHandler == nil {
@@ -122,12 +130,12 @@ func NewConnectionWithMaxWorkers(in io.ReadCloser, out io.WriteCloser, requestHa
 		activeOutRequests:   map[MessageID]*outRequest{},
 		logger:              NullLogger{},
 	}
-	if maxWorkers > 0 {
-		conn.workerSlots = make([]*sync.Mutex, maxWorkers)
-		for i := range conn.workerSlots {
-			conn.workerSlots[i] = &sync.Mutex{}
-		}
+
+	conn.workerSlots = make([]*sync.Mutex, maxWorkers)
+	for i := range conn.workerSlots {
+		conn.workerSlots[i] = &sync.Mutex{}
 	}
+
 	return conn
 }
 
