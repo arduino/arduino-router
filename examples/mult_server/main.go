@@ -35,23 +35,27 @@ func main() {
 	defer s.Close()
 
 	conn := msgpackrpc.NewConnection(s, s,
-		func(ctx context.Context, _ msgpackrpc.FunctionLogger, method string, params []any) (_result any, _err any) {
+		func(ctx context.Context, _ msgpackrpc.FunctionLogger, method string, params []any, res func(_result any, _err any)) {
 			slog.Info("Received request", "method", method, "params", params)
 			if method == "mult" {
 				if len(params) != 2 {
-					return nil, "invalid params"
+					res(nil, "invalid params")
+					return
 				}
 				a, ok := params[0].(float64)
 				if !ok {
-					return nil, "invalid param type, expected float32"
+					res(nil, "invalid param type, expected float32")
+					return
 				}
 				b, ok := params[1].(float64)
 				if !ok {
-					return nil, "invalid param type, expected float32"
+					res(nil, "invalid param type, expected float32")
+					return
 				}
-				return a * b, nil
+				res(a*b, nil)
+				return
 			}
-			return nil, "method not found: " + method
+			res(nil, "method not found: "+method)
 		},
 		nil,
 		nil,

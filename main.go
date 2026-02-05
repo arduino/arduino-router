@@ -165,8 +165,8 @@ func startRouter(cfg Config) error {
 	hciapi.Register(router)
 
 	// Register monitor version API methods
-	if err := router.RegisterMethod("$/version", func(_ context.Context, _ *msgpackrpc.Connection, _ []any) (any, any) {
-		return Version, nil
+	if err := router.RegisterMethod("$/version", func(_ context.Context, _ *msgpackrpc.Connection, _ []any, res func(any, any)) {
+		res(Version, nil)
 	}); err != nil {
 		slog.Error("Failed to register version API", "err", err)
 	}
@@ -182,17 +182,20 @@ func startRouter(cfg Config) error {
 		var serialOpened = sync.NewCond(&serialLock)
 		var serialClosed = sync.NewCond(&serialLock)
 		var serialCloseSignal = make(chan struct{})
-		err := router.RegisterMethod("$/serial/open", func(ctx context.Context, _ *msgpackrpc.Connection, params []any) (result any, err any) {
+		err := router.RegisterMethod("$/serial/open", func(ctx context.Context, _ *msgpackrpc.Connection, params []any, res func(any, any)) {
 			if len(params) != 1 {
-				return nil, []any{1, "Invalid number of parameters"}
+				res(nil, []any{1, "Invalid number of parameters"})
+				return
 			}
 			address, ok := params[0].(string)
 			if !ok {
-				return nil, []any{1, "Invalid parameter type"}
+				res(nil, []any{1, "Invalid parameter type"})
+				return
 			}
 			slog.Info("Request for opening serial port", "serial", address)
 			if address != cfg.SerialPortAddr {
-				return nil, []any{1, "Invalid serial port address"}
+				res(nil, []any{1, "Invalid serial port address"})
+				return
 			}
 			serialOpened.L.Lock()
 			if serialCloseSignal == nil { // check if already opened
@@ -200,20 +203,23 @@ func startRouter(cfg Config) error {
 				serialOpened.Broadcast()
 			}
 			serialOpened.L.Unlock()
-			return true, nil
+			res(true, nil)
 		})
 		f.Assert(err == nil, "Failed to register $/serial/open method")
-		err = router.RegisterMethod("$/serial/close", func(ctx context.Context, _ *msgpackrpc.Connection, params []any) (result any, err any) {
+		err = router.RegisterMethod("$/serial/close", func(ctx context.Context, _ *msgpackrpc.Connection, params []any, res func(any, any)) {
 			if len(params) != 1 {
-				return nil, []any{1, "Invalid number of parameters"}
+				res(nil, []any{1, "Invalid number of parameters"})
+				return
 			}
 			address, ok := params[0].(string)
 			if !ok {
-				return nil, []any{1, "Invalid parameter type"}
+				res(nil, []any{1, "Invalid parameter type"})
+				return
 			}
 			slog.Info("Request for closing serial port", "serial", address)
 			if address != cfg.SerialPortAddr {
-				return nil, []any{1, "Invalid serial port address"}
+				res(nil, []any{1, "Invalid serial port address"})
+				return
 			}
 			serialClosed.L.Lock()
 			if serialCloseSignal != nil { // check if already closed
@@ -222,7 +228,7 @@ func startRouter(cfg Config) error {
 				serialClosed.Wait()
 			}
 			serialClosed.L.Unlock()
-			return true, nil
+			res(true, nil)
 		})
 		f.Assert(err == nil, "Failed to register $/serial/close method")
 		go func() {

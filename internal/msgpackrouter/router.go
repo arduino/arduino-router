@@ -27,7 +27,7 @@ import (
 	"github.com/arduino/arduino-router/msgpackrpc"
 )
 
-type RouterRequestHandler func(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (result any, err any)
+type RouterRequestHandler func(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(result any, err any))
 
 type Router struct {
 	routesLock     sync.Mutex
@@ -84,59 +84,70 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 
 	var msgpackconn *msgpackrpc.Connection
 	msgpackconn = msgpackrpc.NewConnectionWithMaxWorkers(conn, conn,
-		func(ctx context.Context, _ msgpackrpc.FunctionLogger, method string, params []any) (_result any, _err any) {
+		func(ctx context.Context, _ msgpackrpc.FunctionLogger, method string, params []any, _res func(_result any, _err any)) {
 			// This handler is called when a request is received from the client
 			slog.Debug("Received request", "method", method, "params", params)
-			defer func() {
+			res := func(_result any, _err any) {
 				slog.Debug("Received response", "method", method, "result", _result, "error", _err)
-			}()
+				_res(_result, _err)
+			}
 
 			switch method {
 			case "$/register":
 				// Check if the client is trying to register a new method
 				if len(params) != 1 {
-					return nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params)))
+					res(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params))))
+					return
 				} else if methodToRegister, ok := params[0].(string); !ok {
-					return nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: expected string, got %T", params[0]))
+					res(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: expected string, got %T", params[0])))
+					return
 				} else if err := r.registerMethod(methodToRegister, msgpackconn); err != nil {
 					if rae, ok := err.(*RouteError); ok {
-						return nil, rae.ToEncodedError()
+						res(nil, rae.ToEncodedError())
+						return
 					}
-					return nil, routerError(ErrCodeGenericError, err.Error())
+					res(nil, routerError(ErrCodeGenericError, err.Error()))
+					return
 				} else {
-					return true, nil
+					res(true, nil)
+					return
 				}
 			case "$/reset":
 				// Check if the client is trying to remove its registered methods
 				if len(params) != 0 {
-					return nil, routerError(ErrCodeInvalidParams, "invalid params: no params are expected")
+					res(nil, routerError(ErrCodeInvalidParams, "invalid params: no params are expected"))
+					return
 				} else {
 					r.removeMethodsFromConnection(msgpackconn)
-					return true, nil
+					res(true, nil)
+					return
 				}
 			}
 
 			// Check if the method is an internal method
 			if handler, ok := r.routesInternal[method]; ok {
 				// Call the internal method handler
-				return handler(ctx, msgpackconn, params)
+				handler(ctx, msgpackconn, params, res)
+				return
 			}
 
 			// Check if the method is registered
 			client, ok := r.getConnectionForMethod(method)
 			if !ok {
-				return nil, routerError(ErrCodeMethodNotAvailable, fmt.Sprintf("method %s not available", method))
+				res(nil, routerError(ErrCodeMethodNotAvailable, fmt.Sprintf("method %s not available", method)))
+				return
 			}
 
 			// Forward the call to the registered client
 			reqResult, reqError, err := client.SendRequest(ctx, method, params...)
 			if err != nil {
 				slog.Error("Failed to send request", "method", method, "err", err)
-				return nil, routerError(ErrCodeFailedToSendRequests, fmt.Sprintf("failed to send request: %s", err))
+				res(nil, routerError(ErrCodeFailedToSendRequests, fmt.Sprintf("failed to send request: %s", err)))
+				return
 			}
 
 			// Send the response back to the original caller
-			return reqResult, reqError
+			res(reqResult, reqError)
 		},
 		func(_ msgpackrpc.FunctionLogger, method string, params []any) {
 			// This handler is called when a notification is received from the client
@@ -145,7 +156,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			// Check if the method is an internal method
 			if handler, ok := r.routesInternal[method]; ok {
 				// call the internal method handler (since it's a notification, discard the result)
-				_, _ = handler(context.Background(), msgpackconn, params)
+				handler(context.Background(), msgpackconn, params, func(_, _ any) {})
 				return
 			}
 

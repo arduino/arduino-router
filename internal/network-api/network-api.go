@@ -82,24 +82,28 @@ func takeLockAndGenerateNextID() (newID uint, unlock func()) {
 	}
 }
 
-func tcpConnect(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func tcpConnect(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
 	if len(params) != 2 {
-		return nil, []any{1, "Invalid number of parameters, expected server address and port"}
+		res(nil, []any{1, "Invalid number of parameters, expected server address and port"})
+		return
 	}
 	serverAddr, ok := params[0].(string)
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected string for server address"}
+		res(nil, []any{1, "Invalid parameter type, expected string for server address"})
+		return
 	}
 	serverPort, ok := msgpackrpc.ToUint(params[1])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected uint16 for server port"}
+		res(nil, []any{1, "Invalid parameter type, expected uint16 for server port"})
+		return
 	}
 
 	serverAddr = net.JoinHostPort(serverAddr, strconv.FormatUint(uint64(serverPort), 10))
 
 	conn, err := net.Dial("tcp", serverAddr)
 	if err != nil {
-		return nil, []any{2, "Failed to connect to server: " + err.Error()}
+		res(nil, []any{2, "Failed to connect to server: " + err.Error()})
+		return
 	}
 
 	// Successfully connected to the server
@@ -107,42 +111,48 @@ func tcpConnect(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (
 	id, unlock := takeLockAndGenerateNextID()
 	liveConnections[id] = conn
 	unlock()
-	return id, nil
+	res(id, nil)
 }
 
-func tcpListen(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func tcpListen(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
 	if len(params) != 2 {
-		return nil, []any{1, "Invalid number of parameters, expected listen address and port"}
+		res(nil, []any{1, "Invalid number of parameters, expected listen address and port"})
+		return
 	}
 	listenAddr, ok := params[0].(string)
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected string for listen address"}
+		res(nil, []any{1, "Invalid parameter type, expected string for listen address"})
+		return
 	}
 	listenPort, ok := msgpackrpc.ToUint(params[1])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected uint16 for listen port"}
+		res(nil, []any{1, "Invalid parameter type, expected uint16 for listen port"})
+		return
 	}
 
 	listenAddr = net.JoinHostPort(listenAddr, strconv.FormatUint(uint64(listenPort), 10))
 
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		return nil, []any{2, "Failed to start listening on address: " + err.Error()}
+		res(nil, []any{2, "Failed to start listening on address: " + err.Error()})
+		return
 	}
 
 	id, unlock := takeLockAndGenerateNextID()
 	liveListeners[id] = listener
 	unlock()
-	return id, nil
+	res(id, nil)
 }
 
-func tcpAccept(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func tcpAccept(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
 	if len(params) != 1 {
-		return nil, []any{1, "Invalid number of parameters, expected listener ID"}
+		res(nil, []any{1, "Invalid number of parameters, expected listener ID"})
+		return
 	}
 	listenerID, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected int for listener ID"}
+		res(nil, []any{1, "Invalid parameter type, expected int for listener ID"})
+		return
 	}
 
 	lock.RLock()
@@ -150,12 +160,14 @@ func tcpAccept(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_
 	lock.RUnlock()
 
 	if !exists {
-		return nil, []any{2, fmt.Sprintf("Listener not found for ID: %d", listenerID)}
+		res(nil, []any{2, fmt.Sprintf("Listener not found for ID: %d", listenerID)})
+		return
 	}
 
 	conn, err := listener.Accept()
 	if err != nil {
-		return nil, []any{3, "Failed to accept connection: " + err.Error()}
+		res(nil, []any{3, "Failed to accept connection: " + err.Error()})
+		return
 	}
 
 	// Successfully accepted a connection
@@ -163,16 +175,18 @@ func tcpAccept(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_
 	connID, unlock := takeLockAndGenerateNextID()
 	liveConnections[connID] = conn
 	unlock()
-	return connID, nil
+	res(connID, nil)
 }
 
-func tcpClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func tcpClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
 	if len(params) != 1 {
-		return nil, []any{1, "Invalid number of parameters, expected connection ID"}
+		res(nil, []any{1, "Invalid number of parameters, expected connection ID"})
+		return
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected int for connection ID"}
+		res(nil, []any{1, "Invalid parameter type, expected int for connection ID"})
+		return
 	}
 
 	lock.Lock()
@@ -183,25 +197,29 @@ func tcpClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_r
 	lock.Unlock()
 
 	if !existsConn {
-		return nil, []any{2, fmt.Sprintf("Connection not found for ID: %d", id)}
+		res(nil, []any{2, fmt.Sprintf("Connection not found for ID: %d", id)})
+		return
 	}
 
 	// Close the connection if it exists
 	// We do not return an error to the caller if the close operation fails, as it is not critical,
 	// but we only log the error for debugging purposes.
 	if err := conn.Close(); err != nil {
-		return err.Error(), nil
+		res(err.Error(), nil)
+		return
 	}
-	return "", nil
+	res("", nil)
 }
 
-func tcpCloseListener(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func tcpCloseListener(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
 	if len(params) != 1 {
-		return nil, []any{1, "Invalid number of parameters, expected listener ID"}
+		res(nil, []any{1, "Invalid number of parameters, expected listener ID"})
+		return
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected int for listener ID"}
+		res(nil, []any{1, "Invalid parameter type, expected int for listener ID"})
+		return
 	}
 
 	lock.Lock()
@@ -212,35 +230,41 @@ func tcpCloseListener(ctx context.Context, rpc *msgpackrpc.Connection, params []
 	lock.Unlock()
 
 	if !existsListener {
-		return nil, []any{2, fmt.Sprintf("Listener not found for ID: %d", id)}
+		res(nil, []any{2, fmt.Sprintf("Listener not found for ID: %d", id)})
+		return
 	}
 
 	// Close the listener if it exists
 	// We do not return an error to the caller if the close operation fails, as it is not critical,
 	// but we only log the error for debugging purposes.
 	if err := listener.Close(); err != nil {
-		return err.Error(), nil
+		res(err.Error(), nil)
+		return
 	}
-	return "", nil
+	res("", nil)
 }
 
-func tcpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func tcpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
 	if len(params) != 2 && len(params) != 3 {
-		return nil, []any{1, "Invalid number of parameters, expected (connection ID, max bytes to read[, optional timeout in ms])"}
+		res(nil, []any{1, "Invalid number of parameters, expected (connection ID, max bytes to read[, optional timeout in ms])"})
+		return
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected int for connection ID"}
+		res(nil, []any{1, "Invalid parameter type, expected int for connection ID"})
+		return
 	}
 	lock.RLock()
 	conn, ok := liveConnections[id]
 	lock.RUnlock()
 	if !ok {
-		return nil, []any{2, fmt.Sprintf("Connection not found for ID: %d", id)}
+		res(nil, []any{2, fmt.Sprintf("Connection not found for ID: %d", id)})
+		return
 	}
 	maxBytes, ok := msgpackrpc.ToUint(params[1])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected int for max bytes to read"}
+		res(nil, []any{1, "Invalid parameter type, expected int for max bytes to read"})
+		return
 	}
 	var deadline time.Time // default value == no timeout
 	if len(params) == 2 {
@@ -249,38 +273,44 @@ func tcpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_re
 		// read, so we set it by default to a very short duration in the future (1 ms).
 		deadline = time.Now().Add(time.Millisecond)
 	} else if ms, ok := msgpackrpc.ToInt(params[2]); !ok {
-		return nil, []any{1, "Invalid parameter type, expected int for timeout in ms"}
+		res(nil, []any{1, "Invalid parameter type, expected int for timeout in ms"})
+		return
 	} else if ms > 0 {
 		deadline = time.Now().Add(time.Duration(ms) * time.Millisecond)
 	}
 
 	buffer := make([]byte, maxBytes)
 	if err := conn.SetReadDeadline(deadline); err != nil {
-		return nil, []any{3, "Failed to set read timeout: " + err.Error()}
+		res(nil, []any{3, "Failed to set read timeout: " + err.Error()})
+		return
 	}
 	n, err := conn.Read(buffer)
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		// timeout
 	} else if err != nil {
-		return nil, []any{3, "Failed to read from connection: " + err.Error()}
+		res(nil, []any{3, "Failed to read from connection: " + err.Error()})
+		return
 	}
 
-	return buffer[:n], nil
+	res(buffer[:n], nil)
 }
 
-func tcpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func tcpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
 	if len(params) != 2 {
-		return nil, []any{1, "Invalid number of parameters, expected (connection ID, data to write)"}
+		res(nil, []any{1, "Invalid number of parameters, expected (connection ID, data to write)"})
+		return
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected int for connection ID"}
+		res(nil, []any{1, "Invalid parameter type, expected int for connection ID"})
+		return
 	}
 	lock.RLock()
 	conn, ok := liveConnections[id]
 	lock.RUnlock()
 	if !ok {
-		return nil, []any{2, fmt.Sprintf("Connection not found for ID: %d", id)}
+		res(nil, []any{2, fmt.Sprintf("Connection not found for ID: %d", id)})
+		return
 	}
 	data, ok := params[1].([]byte)
 	if !ok {
@@ -288,30 +318,35 @@ func tcpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_r
 			data = []byte(dataStr)
 		} else {
 			// If data is not []byte or string, return an error
-			return nil, []any{1, "Invalid parameter type, expected []byte or string for data to write"}
+			res(nil, []any{1, "Invalid parameter type, expected []byte or string for data to write"})
+			return
 		}
 	}
 
 	n, err := conn.Write(data)
 	if err != nil {
-		return nil, []any{3, "Failed to write to connection: " + err.Error()}
+		res(nil, []any{3, "Failed to write to connection: " + err.Error()})
+		return
 	}
 
-	return n, nil
+	res(n, nil)
 }
 
-func tcpConnectSSL(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func tcpConnectSSL(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
 	n := len(params)
 	if n < 1 || n > 3 {
-		return nil, []any{1, "Invalid number of parameters, expected server address, port and optional TLS cert"}
+		res(nil, []any{1, "Invalid number of parameters, expected server address, port and optional TLS cert"})
+		return
 	}
 	serverAddr, ok := params[0].(string)
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected string for server address"}
+		res(nil, []any{1, "Invalid parameter type, expected string for server address"})
+		return
 	}
 	serverPort, ok := msgpackrpc.ToUint(params[1])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected uint16 for server port"}
+		res(nil, []any{1, "Invalid parameter type, expected uint16 for server port"})
+		return
 	}
 
 	serverAddr = net.JoinHostPort(serverAddr, strconv.FormatUint(uint64(serverPort), 10))
@@ -320,14 +355,16 @@ func tcpConnectSSL(ctx context.Context, rpc *msgpackrpc.Connection, params []any
 	if n == 3 {
 		cert, ok := params[2].(string)
 		if !ok {
-			return nil, []any{1, "Invalid parameter type, expected string for TLS cert"}
+			res(nil, []any{1, "Invalid parameter type, expected string for TLS cert"})
+			return
 		}
 
 		if len(cert) > 0 {
 			// parse TLS cert in pem format
 			certs := x509.NewCertPool()
 			if !certs.AppendCertsFromPEM([]byte(cert)) {
-				return nil, []any{1, "Failed to parse TLS certificate"}
+				res(nil, []any{1, "Failed to parse TLS certificate"})
+				return
 			}
 			tlsConfig = &tls.Config{
 				MinVersion: tls.VersionTLS12,
@@ -338,7 +375,8 @@ func tcpConnectSSL(ctx context.Context, rpc *msgpackrpc.Connection, params []any
 
 	conn, err := tls.Dial("tcp", serverAddr, tlsConfig)
 	if err != nil {
-		return nil, []any{2, "Failed to connect to server: " + err.Error()}
+		res(nil, []any{2, "Failed to connect to server: " + err.Error()})
+		return
 	}
 
 	// Successfully connected to the server
@@ -346,30 +384,35 @@ func tcpConnectSSL(ctx context.Context, rpc *msgpackrpc.Connection, params []any
 	id, unlock := takeLockAndGenerateNextID()
 	liveConnections[id] = conn
 	unlock()
-	return id, nil
+	res(id, nil)
 }
 
-func udpConnect(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func udpConnect(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
 	if len(params) != 2 {
-		return nil, []any{1, "Invalid number of parameters, expected server address and port"}
+		res(nil, []any{1, "Invalid number of parameters, expected server address and port"})
+		return
 	}
 	serverAddr, ok := params[0].(string)
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected string for server address"}
+		res(nil, []any{1, "Invalid parameter type, expected string for server address"})
+		return
 	}
 	serverPort, ok := msgpackrpc.ToUint(params[1])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected uint16 for server port"}
+		res(nil, []any{1, "Invalid parameter type, expected uint16 for server port"})
+		return
 	}
 
 	serverAddr = net.JoinHostPort(serverAddr, fmt.Sprintf("%d", serverPort))
 	udpAddr, err := net.ResolveUDPAddr("udp", serverAddr)
 	if err != nil {
-		return nil, []any{2, "Failed to resolve UDP address: " + err.Error()}
+		res(nil, []any{2, "Failed to resolve UDP address: " + err.Error()})
+		return
 	}
 	udpConn, err := net.ListenUDP("udp", udpAddr)
 	if err != nil {
-		return nil, []any{2, "Failed to connect to server: " + err.Error()}
+		res(nil, []any{2, "Failed to connect to server: " + err.Error()})
+		return
 	}
 
 	// Successfully opened UDP channel
@@ -377,48 +420,56 @@ func udpConnect(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (
 	id, unlock := takeLockAndGenerateNextID()
 	liveUdpConnections[id] = udpConn
 	unlock()
-	return id, nil
+	res(id, nil)
 }
 
-func udpBeginPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func udpBeginPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
 	if len(params) != 3 {
-		return nil, []any{1, "Invalid number of parameters, expected udpConnId, dest address, dest port"}
+		res(nil, []any{1, "Invalid number of parameters, expected udpConnId, dest address, dest port"})
+		return
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected int for UDP connection ID"}
+		res(nil, []any{1, "Invalid parameter type, expected int for UDP connection ID"})
+		return
 	}
 	targetIP, ok := params[1].(string)
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected string for server address"}
+		res(nil, []any{1, "Invalid parameter type, expected string for server address"})
+		return
 	}
 	targetPort, ok := msgpackrpc.ToUint(params[2])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected uint16 for server port"}
+		res(nil, []any{1, "Invalid parameter type, expected uint16 for server port"})
+		return
 	}
 
 	lock.RLock()
 	defer lock.RUnlock()
 	if _, ok := liveUdpConnections[id]; !ok {
-		return nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)}
+		res(nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)})
+		return
 	}
 	targetAddr := net.JoinHostPort(targetIP, fmt.Sprintf("%d", targetPort))
 	addr, err := net.ResolveUDPAddr("udp", targetAddr) // TODO: This is inefficient, implement some caching
 	if err != nil {
-		return nil, []any{3, "Failed to resolve target address: " + err.Error()}
+		res(nil, []any{3, "Failed to resolve target address: " + err.Error()})
+		return
 	}
 	udpWriteTargets[id] = addr
 	udpWriteBuffers[id] = nil
-	return true, nil
+	res(true, nil)
 }
 
-func udpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func udpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
 	if len(params) != 2 {
-		return nil, []any{1, "Invalid number of parameters, expected udpConnId, payload"}
+		res(nil, []any{1, "Invalid number of parameters, expected udpConnId, payload"})
+		return
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected int for UDP connection ID"}
+		res(nil, []any{1, "Invalid parameter type, expected int for UDP connection ID"})
+		return
 	}
 	data, ok := params[1].([]byte)
 	if !ok {
@@ -426,7 +477,8 @@ func udpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_r
 			data = []byte(dataStr)
 		} else {
 			// If data is not []byte or string, return an error
-			return nil, []any{1, "Invalid parameter type, expected []byte or string for data to write"}
+			res(nil, []any{1, "Invalid parameter type, expected []byte or string for data to write"})
+			return
 		}
 	}
 
@@ -437,18 +489,21 @@ func udpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_r
 	}
 	lock.RUnlock()
 	if !ok {
-		return nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)}
+		res(nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)})
+		return
 	}
-	return len(data), nil
+	res(len(data), nil)
 }
 
-func udpEndPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func udpEndPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
 	if len(params) != 1 {
-		return nil, []any{1, "Invalid number of parameters, expected expected udpConnId"}
+		res(nil, []any{1, "Invalid number of parameters, expected expected udpConnId"})
+		return
 	}
 	id, buffExists := msgpackrpc.ToUint(params[0])
 	if !buffExists {
-		return nil, []any{1, "Invalid parameter type, expected int for UDP connection ID"}
+		res(nil, []any{1, "Invalid parameter type, expected int for UDP connection ID"})
+		return
 	}
 
 	var udpBuffer []byte
@@ -463,31 +518,36 @@ func udpEndPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any)
 	}
 	lock.RUnlock()
 	if !connExists {
-		return nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)}
+		res(nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)})
+		return
 	}
 	if !buffExists {
-		return nil, []any{3, fmt.Sprintf("No UDP packet begun for ID: %d", id)}
+		res(nil, []any{3, fmt.Sprintf("No UDP packet begun for ID: %d", id)})
+		return
 	}
 
 	if n, err := udpConn.WriteTo(udpBuffer, udpAddr); err != nil {
-		return nil, []any{4, "Failed to write to UDP connection: " + err.Error()}
+		res(nil, []any{4, "Failed to write to UDP connection: " + err.Error()})
 	} else {
-		return n, nil
+		res(n, nil)
 	}
 }
 
-func udpAwaitPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func udpAwaitPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
 	if len(params) != 1 && len(params) != 2 {
-		return nil, []any{1, "Invalid number of parameters, expected (UDP connection ID[, optional timeout in ms])"}
+		res(nil, []any{1, "Invalid number of parameters, expected (UDP connection ID[, optional timeout in ms])"})
+		return
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected uint for UDP connection ID"}
+		res(nil, []any{1, "Invalid parameter type, expected uint for UDP connection ID"})
+		return
 	}
 	var deadline time.Time // default value == no timeout
 	if len(params) == 2 {
 		if ms, ok := msgpackrpc.ToInt(params[1]); !ok {
-			return nil, []any{1, "Invalid parameter type, expected int for timeout in ms"}
+			res(nil, []any{1, "Invalid parameter type, expected int for timeout in ms"})
+			return
 		} else if ms > 0 {
 			deadline = time.Now().Add(time.Duration(ms) * time.Millisecond)
 		}
@@ -497,66 +557,78 @@ func udpAwaitPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []an
 	udpConn, ok := liveUdpConnections[id]
 	lock.RUnlock()
 	if !ok {
-		return nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)}
+		res(nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)})
+		return
 	}
 	if err := udpConn.SetReadDeadline(deadline); err != nil {
-		return nil, []any{3, "Failed to set read deadline: " + err.Error()}
+		res(nil, []any{3, "Failed to set read deadline: " + err.Error()})
+		return
 	}
 	buffer := make([]byte, 64*1024) // 64 KB buffer
 	n, addr, err := udpConn.ReadFrom(buffer)
 	if errors.Is(err, os.ErrDeadlineExceeded) {
 		// timeout
-		return nil, []any{5, "Timeout"}
+		res(nil, []any{5, "Timeout"})
+		return
 	}
 	if err != nil {
-		return nil, []any{3, "Failed to read from UDP connection: " + err.Error()}
+		res(nil, []any{3, "Failed to read from UDP connection: " + err.Error()})
+		return
 	}
 	host, portStr, err := net.SplitHostPort(addr.String())
 	if err != nil {
 		// Should never fail, but...
-		return nil, []any{4, "Failed to parse source address: " + err.Error()}
+		res(nil, []any{4, "Failed to parse source address: " + err.Error()})
+		return
 	}
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
 		// Should never fail, but...
-		return nil, []any{4, "Failed to parse source address: " + err.Error()}
+		res(nil, []any{4, "Failed to parse source address: " + err.Error()})
+		return
 	}
 
 	lock.Lock()
 	udpReadBuffers[id] = buffer[:n]
 	lock.Unlock()
-	return []any{n, host, port}, nil
+	res([]any{n, host, port}, nil)
 }
 
-func udpDropPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func udpDropPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
 	if len(params) != 1 && len(params) != 2 {
-		return nil, []any{1, "Invalid number of parameters, expected (UDP connection ID[, optional timeout in ms])"}
+		res(nil, []any{1, "Invalid number of parameters, expected (UDP connection ID[, optional timeout in ms])"})
+		return
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected uint for UDP connection ID"}
+		res(nil, []any{1, "Invalid parameter type, expected uint for UDP connection ID"})
+		return
 	}
 
 	lock.RLock()
 	delete(udpReadBuffers, id)
 	lock.RUnlock()
 	if !ok {
-		return nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)}
+		res(nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)})
+		return
 	}
-	return true, nil
+	res(true, nil)
 }
 
-func udpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func udpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
 	if len(params) != 2 && len(params) != 3 {
-		return nil, []any{1, "Invalid number of parameters, expected (UDP connection ID, max bytes to read)"}
+		res(nil, []any{1, "Invalid number of parameters, expected (UDP connection ID, max bytes to read)"})
+		return
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected uint for UDP connection ID"}
+		res(nil, []any{1, "Invalid parameter type, expected uint for UDP connection ID"})
+		return
 	}
 	maxBytes, ok := msgpackrpc.ToUint(params[1])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected uint for max bytes to read"}
+		res(nil, []any{1, "Invalid parameter type, expected uint for max bytes to read"})
+		return
 	}
 
 	lock.Lock()
@@ -573,16 +645,18 @@ func udpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_re
 	}
 	lock.Unlock()
 
-	return buffer[:n], nil
+	res(buffer[:n], nil)
 }
 
-func udpClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_result any, _err any) {
+func udpClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
 	if len(params) != 1 {
-		return nil, []any{1, "Invalid number of parameters, expected UDP connection ID"}
+		res(nil, []any{1, "Invalid number of parameters, expected UDP connection ID"})
+		return
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		return nil, []any{1, "Invalid parameter type, expected int for UDP connection ID"}
+		res(nil, []any{1, "Invalid parameter type, expected uint for UDP connection ID"})
+		return
 	}
 
 	lock.Lock()
@@ -592,14 +666,16 @@ func udpClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any) (_r
 	lock.Unlock()
 
 	if !existsConn {
-		return nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)}
+		res(nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)})
+		return
 	}
 
 	// Close the connection if it exists
 	// We do not return an error to the caller if the close operation fails, as it is not critical,
 	// but we only log the error for debugging purposes.
 	if err := udpConn.Close(); err != nil {
-		return err.Error(), nil
+		res(err.Error(), nil)
+		return
 	}
-	return "", nil
+	res("", nil)
 }

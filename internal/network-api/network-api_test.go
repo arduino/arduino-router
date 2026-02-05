@@ -160,283 +160,357 @@ const testCert = "-----BEGIN CERTIFICATE-----\n" +
 func TestTCPNetworkAPI(t *testing.T) {
 	ctx := t.Context()
 	var rpc *msgpackrpc.Connection
-	listID, err := tcpListen(ctx, rpc, []any{"localhost", 9999})
-	require.Nil(t, err)
-	require.Equal(t, uint(1), listID)
+	var listID any
+	tcpListen(ctx, rpc, []any{"localhost", 9999}, func(res, err any) {
+		listID = res
+		require.Nil(t, err)
+		require.Equal(t, uint(1), listID)
+	})
 
 	var wg sync.WaitGroup
 	wg.Go(func() {
-		connID, err := tcpConnect(ctx, rpc, []any{"localhost", uint16(9999)})
-		require.Nil(t, err)
+		var connID any
+		tcpConnect(ctx, rpc, []any{"localhost", uint16(9999)}, func(res, err any) {
+			require.Nil(t, err)
+			connID = res
+		})
 
-		n, err := tcpWrite(ctx, rpc, []any{connID, []byte("Hello")})
-		require.Nil(t, err)
-		require.Equal(t, 5, n)
+		tcpWrite(ctx, rpc, []any{connID, []byte("Hello")}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 5, res)
+		})
 
-		res, err := tcpClose(ctx, rpc, []any{connID})
-		require.Nil(t, err)
-		require.Equal(t, "", res)
+		tcpClose(ctx, rpc, []any{connID}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, "", res)
+		})
 
-		res, err = tcpClose(ctx, rpc, []any{connID})
-		require.Equal(t, []any{2, fmt.Sprintf("Connection not found for ID: %d", connID)}, err)
+		tcpClose(ctx, rpc, []any{connID}, func(res, err any) {
+			require.Equal(t, []any{2, fmt.Sprintf("Connection not found for ID: %d", connID)}, err)
+			require.Nil(t, res)
+		})
+	})
+
+	var connID any
+	tcpAccept(ctx, rpc, []any{listID}, func(res, err any) {
+		require.Nil(t, err)
+		connID = res
+	})
+
+	tcpRead(ctx, rpc, []any{connID, 3}, func(res, err any) {
+		require.Nil(t, err)
+		require.Equal(t, []byte("Hel"), res)
+	})
+
+	tcpRead(ctx, rpc, []any{connID, 3}, func(res, err any) {
+		require.Nil(t, err)
+		require.Equal(t, []byte("lo"), res)
+	})
+
+	tcpRead(ctx, rpc, []any{connID, 3}, func(res, err any) {
+		require.Equal(t, []any{3, "Failed to read from connection: EOF"}, err)
 		require.Nil(t, res)
 	})
 
-	connID, err := tcpAccept(ctx, rpc, []any{listID})
-	require.Nil(t, err)
+	tcpCloseListener(ctx, rpc, []any{connID}, func(res, err any) {
+		require.Equal(t, []any{2, fmt.Sprintf("Listener not found for ID: %d", connID)}, err)
+		require.Nil(t, res)
+	})
 
-	buff, err := tcpRead(ctx, rpc, []any{connID, 3})
-	require.Nil(t, err)
-	require.Equal(t, []byte("Hel"), buff)
+	tcpClose(ctx, rpc, []any{connID}, func(res, err any) {
+		require.Nil(t, err)
+		require.Equal(t, "", res)
+	})
 
-	buff, err = tcpRead(ctx, rpc, []any{connID, 3})
-	require.Nil(t, err)
-	require.Equal(t, []byte("lo"), buff)
+	tcpClose(ctx, rpc, []any{listID}, func(res, err any) {
+		require.Equal(t, []any{2, fmt.Sprintf("Connection not found for ID: %d", listID)}, err)
+		require.Nil(t, res)
+	})
 
-	buff, err = tcpRead(ctx, rpc, []any{connID, 3})
-	require.Equal(t, []any{3, "Failed to read from connection: EOF"}, err)
-	require.Nil(t, buff)
+	tcpCloseListener(ctx, rpc, []any{listID}, func(res, err any) {
+		require.Nil(t, err)
+		require.Equal(t, "", res)
+	})
 
-	res, err := tcpCloseListener(ctx, rpc, []any{connID})
-	require.Equal(t, []any{2, fmt.Sprintf("Listener not found for ID: %d", connID)}, err)
-	require.Nil(t, res)
+	tcpClose(ctx, rpc, []any{listID}, func(res, err any) {
+		require.Equal(t, []any{2, fmt.Sprintf("Connection not found for ID: %d", listID)}, err)
+		require.Nil(t, res)
+	})
 
-	res, err = tcpClose(ctx, rpc, []any{connID})
-	require.Nil(t, err)
-	require.Equal(t, "", res)
-
-	res, err = tcpClose(ctx, rpc, []any{listID})
-	require.Equal(t, []any{2, fmt.Sprintf("Connection not found for ID: %d", listID)}, err)
-	require.Nil(t, res)
-
-	res, err = tcpCloseListener(ctx, rpc, []any{listID})
-	require.Nil(t, err)
-	require.Equal(t, "", res)
-
-	res, err = tcpClose(ctx, rpc, []any{listID})
-	require.Equal(t, []any{2, fmt.Sprintf("Connection not found for ID: %d", listID)}, err)
-	require.Nil(t, res)
-
-	res, err = tcpCloseListener(ctx, rpc, []any{listID})
-	require.Equal(t, []any{2, fmt.Sprintf("Listener not found for ID: %d", listID)}, err)
-	require.Nil(t, res)
+	tcpCloseListener(ctx, rpc, []any{listID}, func(res, err any) {
+		require.Equal(t, []any{2, fmt.Sprintf("Listener not found for ID: %d", listID)}, err)
+		require.Nil(t, res)
+	})
 
 	// Test SSL connection
-	connIDSSL, err := tcpConnectSSL(ctx, rpc, []any{"www.arduino.cc", uint16(443)})
-	require.Nil(t, err)
-	require.Equal(t, uint(4), connIDSSL)
+	var connIDSSL any
+	tcpConnectSSL(ctx, rpc, []any{"www.arduino.cc", uint16(443)}, func(res, err any) {
+		require.Nil(t, err)
+		connIDSSL = res
+		require.Equal(t, uint(4), connIDSSL)
+	})
 
-	res, err = tcpClose(ctx, rpc, []any{connIDSSL})
-	require.Nil(t, err)
-	require.Equal(t, "", res)
+	tcpClose(ctx, rpc, []any{connIDSSL}, func(res, err any) {
+		require.Nil(t, err)
+		require.Equal(t, "", res)
+	})
 
 	// Test SSL connection with failing certificate verification
-	connIDSSL, err = tcpConnectSSL(ctx, rpc, []any{"www.arduino.cc", uint16(443), testCert})
-	require.Equal(t, []any{2, "Failed to connect to server: tls: failed to verify certificate: x509: certificate signed by unknown authority"}, err)
-	require.Nil(t, connIDSSL)
+	tcpConnectSSL(ctx, rpc, []any{"www.arduino.cc", uint16(443), testCert}, func(res, err any) {
+		require.Equal(t, []any{2, "Failed to connect to server: tls: failed to verify certificate: x509: certificate signed by unknown authority"}, err)
+		require.Nil(t, res)
+	})
 
 	wg.Wait()
 }
 
 func TestUDPNetworkAPI(t *testing.T) {
 	ctx := t.Context()
-	conn1, err := udpConnect(ctx, nil, []any{"0.0.0.0", 9800})
-	require.Nil(t, err)
+	var conn1, conn2 any
+	udpConnect(ctx, nil, []any{"0.0.0.0", 9800}, func(res, err any) {
+		require.Nil(t, err)
+		conn1 = res
+	})
 
-	conn2, err := udpConnect(ctx, nil, []any{"0.0.0.0", 9900})
-	require.Nil(t, err)
-	require.NotEqual(t, conn1, conn2)
+	udpConnect(ctx, nil, []any{"0.0.0.0", 9900}, func(res, err any) {
+		require.Nil(t, err)
+		conn2 = res
+		require.NotEqual(t, conn1, conn2)
+	})
 
 	{
-		res, err := udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9900})
-		require.Nil(t, err)
-		require.True(t, res.(bool))
-		res, err = udpWrite(ctx, nil, []any{conn1, []byte("Hello")})
-		require.Nil(t, err)
-		require.Equal(t, 5, res)
-		res, err = udpEndPacket(ctx, nil, []any{conn1})
-		require.Nil(t, err)
-		require.Equal(t, 5, res)
+		udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9900}, func(res, err any) {
+			require.Nil(t, err)
+			require.True(t, res.(bool))
+		})
+		udpWrite(ctx, nil, []any{conn1, []byte("Hello")}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 5, res)
+		})
+		udpEndPacket(ctx, nil, []any{conn1}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 5, res)
+		})
 	}
 	{
-		res, err := udpAwaitPacket(ctx, nil, []any{conn2})
-		require.Nil(t, err)
-		require.Equal(t, []any{5, "127.0.0.1", 9800}, res)
-
-		res2, err := udpRead(ctx, nil, []any{conn2, 100})
-		require.Nil(t, err)
-		require.Equal(t, []uint8("Hello"), res2)
+		udpAwaitPacket(ctx, nil, []any{conn2}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, []any{5, "127.0.0.1", 9800}, res)
+		})
+		udpRead(ctx, nil, []any{conn2, 100}, func(res2, err any) {
+			require.Nil(t, err)
+			require.Equal(t, []uint8("Hello"), res2)
+		})
 	}
 	{
-		res, err := udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9900})
-		require.Nil(t, err)
-		require.True(t, res.(bool))
-		res, err = udpWrite(ctx, nil, []any{conn1, []byte("On")})
-		require.Nil(t, err)
-		require.Equal(t, 2, res)
-		res, err = udpWrite(ctx, nil, []any{conn1, []byte("e")})
-		require.Nil(t, err)
-		require.Equal(t, 1, res)
-		res, err = udpEndPacket(ctx, nil, []any{conn1})
-		require.Nil(t, err)
-		require.Equal(t, 3, res)
+		udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9900}, func(res, err any) {
+			require.Nil(t, err)
+			require.True(t, res.(bool))
+		})
+		udpWrite(ctx, nil, []any{conn1, []byte("On")}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 2, res)
+		})
+		udpWrite(ctx, nil, []any{conn1, []byte("e")}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 1, res)
+		})
+		udpEndPacket(ctx, nil, []any{conn1}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 3, res)
+		})
 	}
 	{
-		res, err := udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9900})
-		require.Nil(t, err)
-		require.True(t, res.(bool))
-		res, err = udpWrite(ctx, nil, []any{conn1, []byte("Two")})
-		require.Nil(t, err)
-		require.Equal(t, 3, res)
-		res, err = udpEndPacket(ctx, nil, []any{conn1})
-		require.Nil(t, err)
-		require.Equal(t, 3, res)
+		udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9900}, func(res, err any) {
+			require.Nil(t, err)
+			require.True(t, res.(bool))
+		})
+		udpWrite(ctx, nil, []any{conn1, []byte("Two")}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 3, res)
+		})
+		udpEndPacket(ctx, nil, []any{conn1}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 3, res)
+		})
 	}
 	{
-		res, err := udpAwaitPacket(ctx, nil, []any{conn2})
-		require.Nil(t, err)
-		require.Equal(t, []any{3, "127.0.0.1", 9800}, res)
+		udpAwaitPacket(ctx, nil, []any{conn2}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, []any{3, "127.0.0.1", 9800}, res)
+		})
 
 		// A partial read of a packet is allowed
-		res2, err := udpRead(ctx, nil, []any{conn2, 2})
-		require.Nil(t, err)
-		require.Equal(t, []uint8("On"), res2)
+		udpRead(ctx, nil, []any{conn2, 2}, func(res2, err any) {
+			require.Nil(t, err)
+			require.Equal(t, []uint8("On"), res2)
+		})
 	}
 	{
 		// Even if the previous packet was only partially read,
 		// the next packet can be received
-		res, err := udpAwaitPacket(ctx, nil, []any{conn2})
-		require.Nil(t, err)
-		require.Equal(t, []any{3, "127.0.0.1", 9800}, res)
+		udpAwaitPacket(ctx, nil, []any{conn2}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, []any{3, "127.0.0.1", 9800}, res)
+		})
 
-		res2, err := udpRead(ctx, nil, []any{conn2, 100})
-		require.Nil(t, err)
-		require.Equal(t, []uint8("Two"), res2)
+		udpRead(ctx, nil, []any{conn2, 100}, func(res2, err any) {
+			require.Nil(t, err)
+			require.Equal(t, []uint8("Two"), res2)
+		})
 	}
 	{
-		res, err := udpClose(ctx, nil, []any{conn1})
-		require.Nil(t, err)
-		require.Equal(t, "", res)
+		udpClose(ctx, nil, []any{conn1}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, "", res)
+		})
 	}
 	{
-		res, err := udpClose(ctx, nil, []any{conn2})
-		require.Nil(t, err)
-		require.Equal(t, "", res)
+		udpClose(ctx, nil, []any{conn2}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, "", res)
+		})
 	}
 }
 
 func TestUDPNetworkUnboundClientAPI(t *testing.T) {
 	ctx := t.Context()
-	conn1, err := udpConnect(ctx, nil, []any{"", 0})
-	require.Nil(t, err)
 
-	conn2, err := udpConnect(ctx, nil, []any{"0.0.0.0", 9901})
-	require.Nil(t, err)
+	var conn1, conn2 any
+	udpConnect(ctx, nil, []any{"", 0}, func(result, err any) {
+		conn1 = result
+		require.Nil(t, err)
+	})
+
+	udpConnect(ctx, nil, []any{"0.0.0.0", 9901}, func(result, err any) {
+		conn2 = result
+		require.Nil(t, err)
+	})
 	require.NotEqual(t, conn1, conn2)
 
 	{
-		res, err := udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9901})
-		require.Nil(t, err)
-		require.True(t, res.(bool))
-		res, err = udpWrite(ctx, nil, []any{conn1, []byte("Hello")})
-		require.Nil(t, err)
-		require.Equal(t, 5, res)
-		res, err = udpEndPacket(ctx, nil, []any{conn1})
-		require.Nil(t, err)
-		require.Equal(t, 5, res)
+		udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9901}, func(res, err any) {
+			require.Nil(t, err)
+			require.True(t, res.(bool))
+		})
+		udpWrite(ctx, nil, []any{conn1, []byte("Hello")}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 5, res)
+		})
+		udpEndPacket(ctx, nil, []any{conn1}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 5, res)
+		})
 	}
 	{
-		res, err := udpAwaitPacket(ctx, nil, []any{conn2})
-		require.Nil(t, err)
-		require.Equal(t, 5, res.([]any)[0])
-
-		res2, err := udpRead(ctx, nil, []any{conn2, 2})
-		require.Nil(t, err)
-		require.Equal(t, []uint8("He"), res2)
-
-		res2, err = udpRead(ctx, nil, []any{conn2, 20})
-		require.Nil(t, err)
-		require.Equal(t, []uint8("llo"), res2)
+		udpAwaitPacket(ctx, nil, []any{conn2}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 5, res.([]any)[0])
+		})
+		udpRead(ctx, nil, []any{conn2, 2}, func(res2, err any) {
+			require.Nil(t, err)
+			require.Equal(t, []uint8("He"), res2)
+		})
+		udpRead(ctx, nil, []any{conn2, 20}, func(res2, err any) {
+			require.Nil(t, err)
+			require.Equal(t, []uint8("llo"), res2)
+		})
 	}
 	{
-		res, err := udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9901})
-		require.Nil(t, err)
-		require.True(t, res.(bool))
-		res, err = udpWrite(ctx, nil, []any{conn1, []byte("One")})
-		require.Nil(t, err)
-		require.Equal(t, 3, res)
-		res, err = udpEndPacket(ctx, nil, []any{conn1})
-		require.Nil(t, err)
-		require.Equal(t, 3, res)
+		udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9901}, func(res, err any) {
+			require.Nil(t, err)
+			require.True(t, res.(bool))
+		})
+		udpWrite(ctx, nil, []any{conn1, []byte("One")}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 3, res)
+		})
+		udpEndPacket(ctx, nil, []any{conn1}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 3, res)
+		})
 	}
 	{
-		res, err := udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9901})
-		require.Nil(t, err)
-		require.True(t, res.(bool))
-		res, err = udpWrite(ctx, nil, []any{conn1, []byte("Two")})
-		require.Nil(t, err)
-		require.Equal(t, 3, res)
-		res, err = udpEndPacket(ctx, nil, []any{conn1})
-		require.Nil(t, err)
-		require.Equal(t, 3, res)
+		udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9901}, func(res, err any) {
+			require.Nil(t, err)
+			require.True(t, res.(bool))
+		})
+		udpWrite(ctx, nil, []any{conn1, []byte("Two")}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 3, res)
+		})
+		udpEndPacket(ctx, nil, []any{conn1}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 3, res)
+		})
 	}
 	{
-		res, err := udpAwaitPacket(ctx, nil, []any{conn2})
-		require.Nil(t, err)
-		require.Equal(t, 3, res.([]any)[0])
-
-		res2, err := udpRead(ctx, nil, []any{conn2, 100})
-		require.Nil(t, err)
-		require.Equal(t, []uint8("One"), res2)
+		udpAwaitPacket(ctx, nil, []any{conn2}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 3, res.([]any)[0])
+		})
+		udpRead(ctx, nil, []any{conn2, 100}, func(res2, err any) {
+			require.Nil(t, err)
+			require.Equal(t, []uint8("One"), res2)
+		})
 	}
 	{
-		res, err := udpAwaitPacket(ctx, nil, []any{conn2})
-		require.Nil(t, err)
-		require.Equal(t, 3, res.([]any)[0])
-
-		res2, err := udpRead(ctx, nil, []any{conn2, 100})
-		require.Nil(t, err)
-		require.Equal(t, []uint8("Two"), res2)
+		udpAwaitPacket(ctx, nil, []any{conn2}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 3, res.([]any)[0])
+		})
+		udpRead(ctx, nil, []any{conn2, 100}, func(res2, err any) {
+			require.Nil(t, err)
+			require.Equal(t, []uint8("Two"), res2)
+		})
 	}
 
 	// Check timeouts
 	go func() {
 		time.Sleep(200 * time.Millisecond)
-		res, err := udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9901})
-		require.Nil(t, err)
-		require.True(t, res.(bool))
-		res, err = udpWrite(ctx, nil, []any{conn1, []byte("Three")})
-		require.Nil(t, err)
-		require.Equal(t, 5, res)
-		res, err = udpEndPacket(ctx, nil, []any{conn1})
-		require.Nil(t, err)
-		require.Equal(t, 5, res)
+		udpBeginPacket(ctx, nil, []any{conn1, "127.0.0.1", 9901}, func(res, err any) {
+			require.Nil(t, err)
+			require.True(t, res.(bool))
+		})
+		udpWrite(ctx, nil, []any{conn1, []byte("Three")}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 5, res)
+		})
+		udpEndPacket(ctx, nil, []any{conn1}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 5, res)
+		})
 	}()
 	{
 		start := time.Now()
-		res, err := udpAwaitPacket(ctx, nil, []any{conn2, 10})
-		require.Less(t, time.Since(start), 20*time.Millisecond)
-		require.Equal(t, []any{5, "Timeout"}, err)
-		require.Nil(t, res)
+		udpAwaitPacket(ctx, nil, []any{conn2, 10}, func(res, err any) {
+			require.Less(t, time.Since(start), 20*time.Millisecond)
+			require.Equal(t, []any{5, "Timeout"}, err)
+			require.Nil(t, res)
+		})
 	}
 	{
-		res, err := udpAwaitPacket(ctx, nil, []any{conn2, 0})
-		require.Nil(t, err)
-		require.Equal(t, 5, res.([]any)[0])
+		udpAwaitPacket(ctx, nil, []any{conn2, 0}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, 5, res.([]any)[0])
+		})
 
-		res2, err := udpRead(ctx, nil, []any{conn2, 100, 0})
-		require.Nil(t, err)
-		require.Equal(t, []uint8("Three"), res2)
+		udpRead(ctx, nil, []any{conn2, 100, 0}, func(res2, err any) {
+			require.Nil(t, err)
+			require.Equal(t, []uint8("Three"), res2)
+		})
 	}
 
 	{
-		res, err := udpClose(ctx, nil, []any{conn1})
-		require.Nil(t, err)
-		require.Equal(t, "", res)
+		udpClose(ctx, nil, []any{conn1}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, "", res)
+		})
 	}
 	{
-		res, err := udpClose(ctx, nil, []any{conn2})
-		require.Nil(t, err)
-		require.Equal(t, "", res)
+		udpClose(ctx, nil, []any{conn2}, func(res, err any) {
+			require.Nil(t, err)
+			require.Equal(t, "", res)
+		})
 	}
 }
