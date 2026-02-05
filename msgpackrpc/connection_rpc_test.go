@@ -45,7 +45,7 @@ func TestRPCConnection(t *testing.T) {
 	requestError := ""
 	conn := NewConnection(
 		in, out,
-		func(ctx context.Context, logger FunctionLogger, method string, params []any) (_result any, _err any) {
+		func(ctx context.Context, logger FunctionLogger, method string, params []any, res func(result any, err any)) {
 			defer wg.Done()
 			request = fmt.Sprintf("REQ method=%v params=%v", method, params)
 			if method == "tocancel" {
@@ -56,9 +56,10 @@ func TestRPCConnection(t *testing.T) {
 					request += " not canceled"
 					t.Fail()
 				}
-				return nil, CustomError{Code: 1, Message: "error message"}
+				res(nil, CustomError{Code: 1, Message: "error message"})
+				return
 			}
-			return []any{}, nil
+			res([]any{}, nil)
 		},
 		func(logger FunctionLogger, method string, params []any) {
 			defer wg.Done()
@@ -168,13 +169,13 @@ func TestRPCRougeDoubleCallWithSameID(t *testing.T) {
 	var wg sync.WaitGroup
 	conn := NewConnection(
 		in, out,
-		func(ctx context.Context, logger FunctionLogger, method string, params []any) (_result any, _err any) {
+		func(ctx context.Context, logger FunctionLogger, method string, params []any, res func(result any, err any)) {
 			defer wg.Done()
 			reqLock.Lock()
 			request += fmt.Sprintf("REQ method=%v params=%v\n", method, params)
 			reqLock.Unlock()
 			time.Sleep(500 * time.Millisecond) // Simulate a long request
-			return params[0], nil
+			res(params[0], nil)
 		},
 		nil,
 		func(e error) {

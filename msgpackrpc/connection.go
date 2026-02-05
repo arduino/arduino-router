@@ -73,7 +73,7 @@ type outResponse struct {
 }
 
 // RequestHandler handles requests from a MessagePack-RPC Connection.
-type RequestHandler func(ctx context.Context, logger FunctionLogger, method string, params []any) (result any, err any)
+type RequestHandler func(ctx context.Context, logger FunctionLogger, method string, params []any, cb func(result any, err any))
 
 // NotificationHandler handles notifications from a MessagePack-RPC Connection.
 type NotificationHandler func(logger FunctionLogger, method string, params []any)
@@ -94,8 +94,8 @@ func NewConnectionWithMaxWorkers(in io.ReadCloser, out io.WriteCloser, requestHa
 	outEncoder := msgpack.NewEncoder(out)
 	outEncoder.UseCompactInts(true)
 	if requestHandler == nil {
-		requestHandler = func(ctx context.Context, logger FunctionLogger, method string, params []any) (result any, err any) {
-			return nil, fmt.Errorf("method not implemented: %s", method)
+		requestHandler = func(ctx context.Context, logger FunctionLogger, method string, params []any, res func(result any, err any)) {
+			res(nil, fmt.Errorf("method not implemented: %s", method))
 		}
 	}
 	if notificationHandler == nil {
@@ -240,9 +240,7 @@ func (c *Connection) handleIncomingRequest(id MessageID, method string, params [
 	logger := c.logger.LogIncomingRequest(id, method, params)
 	c.loggerMutex.Unlock()
 
-	c.startWorker(func() {
-		reqResult, reqError := c.requestHandler(ctx, logger, method, params)
-
+	cb := func(reqResult, reqError any) {
 		var existing *inRequest
 		c.activeInRequestsMutex.Lock()
 		existing = c.activeInRequests[id]
@@ -263,6 +261,9 @@ func (c *Connection) handleIncomingRequest(id MessageID, method string, params [
 			c.errorHandler(fmt.Errorf("error sending response: %w", err))
 			c.Close()
 		}
+	}
+	c.startWorker(func() {
+		c.requestHandler(ctx, logger, method, params, cb)
 	})
 }
 
