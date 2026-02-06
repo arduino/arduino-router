@@ -46,24 +46,28 @@ func TestRPCConnection(t *testing.T) {
 	conn := NewConnection(
 		in, out,
 		func(ctx context.Context, logger FunctionLogger, method string, params []any, res func(result any, err any)) {
-			defer wg.Done()
-			request = fmt.Sprintf("REQ method=%v params=%v", method, params)
-			if method == "tocancel" {
-				select {
-				case <-ctx.Done():
-					request += " canceled"
-				case <-time.After(time.Second):
-					request += " not canceled"
-					t.Fail()
+			go func() {
+				defer wg.Done()
+				request = fmt.Sprintf("REQ method=%v params=%v", method, params)
+				if method == "tocancel" {
+					select {
+					case <-ctx.Done():
+						request += " canceled"
+					case <-time.After(time.Second):
+						request += " not canceled"
+						t.Fail()
+					}
+					res(nil, CustomError{Code: 1, Message: "error message"})
+					return
 				}
-				res(nil, CustomError{Code: 1, Message: "error message"})
-				return
-			}
-			res([]any{}, nil)
+				res([]any{}, nil)
+			}()
 		},
 		func(logger FunctionLogger, method string, params []any) {
-			defer wg.Done()
-			notification = fmt.Sprintf("NOT method=%v params=%v", method, params)
+			go func() {
+				defer wg.Done()
+				notification = fmt.Sprintf("NOT method=%v params=%v", method, params)
+			}()
 		},
 		func(e error) {
 			defer wg.Done()
@@ -170,12 +174,14 @@ func TestRPCRougeDoubleCallWithSameID(t *testing.T) {
 	conn := NewConnection(
 		in, out,
 		func(ctx context.Context, logger FunctionLogger, method string, params []any, res func(result any, err any)) {
-			defer wg.Done()
-			reqLock.Lock()
-			request += fmt.Sprintf("REQ method=%v params=%v\n", method, params)
-			reqLock.Unlock()
-			time.Sleep(500 * time.Millisecond) // Simulate a long request
-			res(params[0], nil)
+			go func() {
+				defer wg.Done()
+				reqLock.Lock()
+				request += fmt.Sprintf("REQ method=%v params=%v\n", method, params)
+				reqLock.Unlock()
+				time.Sleep(500 * time.Millisecond) // Simulate a long request
+				res(params[0], nil)
+			}()
 		},
 		nil,
 		func(e error) {

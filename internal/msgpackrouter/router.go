@@ -82,8 +82,9 @@ func (r *Router) RegisterMethod(method string, handler RouterRequestHandler) err
 func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 	defer conn.Close()
 
+	workers := newWorkerPool(r.sendMaxWorkers)
 	var msgpackconn *msgpackrpc.Connection
-	msgpackconn = msgpackrpc.NewConnectionWithMaxWorkers(conn, conn,
+	msgpackconn = msgpackrpc.NewConnection(conn, conn,
 		func(ctx context.Context, _ msgpackrpc.FunctionLogger, method string, params []any, _res func(_result any, _err any)) {
 			// This handler is called when a request is received from the client
 			slog.Debug("Received request", "method", method, "params", params)
@@ -124,54 +125,58 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 				}
 			}
 
-			// Check if the method is an internal method
-			if handler, ok := r.routesInternal[method]; ok {
-				// Call the internal method handler
-				handler(ctx, msgpackconn, params, res)
-				return
-			}
+			workers.Go(func() {
+				// Check if the method is an internal method
+				if handler, ok := r.routesInternal[method]; ok {
+					// Call the internal method handler
+					handler(ctx, msgpackconn, params, res)
+					return
+				}
 
-			// Check if the method is registered
-			client, ok := r.getConnectionForMethod(method)
-			if !ok {
-				res(nil, routerError(ErrCodeMethodNotAvailable, fmt.Sprintf("method %s not available", method)))
-				return
-			}
+				// Check if the method is registered
+				client, ok := r.getConnectionForMethod(method)
+				if !ok {
+					res(nil, routerError(ErrCodeMethodNotAvailable, fmt.Sprintf("method %s not available", method)))
+					return
+				}
 
-			// Forward the call to the registered client
-			reqResult, reqError, err := client.SendRequest(ctx, method, params...)
-			if err != nil {
-				slog.Error("Failed to send request", "method", method, "err", err)
-				res(nil, routerError(ErrCodeFailedToSendRequests, fmt.Sprintf("failed to send request: %s", err)))
-				return
-			}
+				// Forward the call to the registered client
+				reqResult, reqError, err := client.SendRequest(ctx, method, params...)
+				if err != nil {
+					slog.Error("Failed to send request", "method", method, "err", err)
+					res(nil, routerError(ErrCodeFailedToSendRequests, fmt.Sprintf("failed to send request: %s", err)))
+					return
+				}
 
-			// Send the response back to the original caller
-			res(reqResult, reqError)
+				// Send the response back to the original caller
+				res(reqResult, reqError)
+			})
 		},
 		func(_ msgpackrpc.FunctionLogger, method string, params []any) {
 			// This handler is called when a notification is received from the client
 			slog.Debug("Received notification", "method", method, "params", params)
 
-			// Check if the method is an internal method
-			if handler, ok := r.routesInternal[method]; ok {
-				// call the internal method handler (since it's a notification, discard the result)
-				handler(context.Background(), msgpackconn, params, func(_, _ any) {})
-				return
-			}
+			workers.Go(func() {
+				// Check if the method is an internal method
+				if handler, ok := r.routesInternal[method]; ok {
+					// call the internal method handler (since it's a notification, discard the result)
+					handler(context.Background(), msgpackconn, params, func(_, _ any) {})
+					return
+				}
 
-			// Check if the method is registered
-			client, ok := r.getConnectionForMethod(method)
-			if !ok {
-				// if the method is not registered, the notifitication is lost
-				return
-			}
+				// Check if the method is registered
+				client, ok := r.getConnectionForMethod(method)
+				if !ok {
+					// if the method is not registered, the notifitication is lost
+					return
+				}
 
-			// Forward the notification to the registered client
-			if err := client.SendNotification(method, params...); err != nil {
-				slog.Error("Failed to send notification", "method", method, "err", err)
-				return
-			}
+				// Forward the notification to the registered client
+				if err := client.SendNotification(method, params...); err != nil {
+					slog.Error("Failed to send notification", "method", method, "err", err)
+					return
+				}
+			})
 		},
 		func(err error) {
 			if errors.Is(err, io.EOF) {
@@ -180,7 +185,6 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			}
 			slog.Error("Error in connection", "err", err)
 		},
-		r.sendMaxWorkers,
 	)
 
 	msgpackconn.Run()
