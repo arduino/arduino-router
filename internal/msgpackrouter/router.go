@@ -156,27 +156,25 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			// This handler is called when a notification is received from the client
 			slog.Debug("Received notification", "method", method, "params", params)
 
-			workers.Go(func() {
-				// Check if the method is an internal method
-				if handler, ok := r.routesInternal[method]; ok {
-					// call the internal method handler (since it's a notification, discard the result)
-					handler(context.Background(), msgpackconn, params, func(_, _ any) {})
-					return
-				}
+			// Check if the method is an internal method
+			if handler, ok := r.routesInternal[method]; ok {
+				// call the internal method handler (since it's a notification, discard the result)
+				handler(context.Background(), msgpackconn, params, func(_, _ any) {})
+				return
+			}
 
-				// Check if the method is registered
-				client, ok := r.getConnectionForMethod(method)
-				if !ok {
-					// if the method is not registered, the notifitication is lost
-					return
-				}
+			// Check if the method is registered
+			client, ok := r.getConnectionForMethod(method)
+			if !ok {
+				// if the method is not registered, the notifitication is lost
+				return
+			}
 
-				// Forward the notification to the registered client
-				if err := client.SendNotification(method, params...); err != nil {
-					slog.Error("Failed to send notification", "method", method, "err", err)
-					return
-				}
-			})
+			// Forward the notification to the registered client
+			if err := client.SendNotification(method, params...); err != nil {
+				slog.Error("Failed to send notification", "method", method, "err", err)
+				return
+			}
 		},
 		func(err error) {
 			if errors.Is(err, io.EOF) {
