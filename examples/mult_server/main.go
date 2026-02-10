@@ -44,12 +44,12 @@ func main() {
 				}
 				a, ok := params[0].(float64)
 				if !ok {
-					res(nil, "invalid param type, expected float32")
+					res(nil, "invalid param type, expected float64")
 					return
 				}
 				b, ok := params[1].(float64)
 				if !ok {
-					res(nil, "invalid param type, expected float32")
+					res(nil, "invalid param type, expected float64")
 					return
 				}
 				res(a*b, nil)
