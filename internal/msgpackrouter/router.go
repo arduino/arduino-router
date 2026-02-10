@@ -82,7 +82,6 @@ func (r *Router) RegisterMethod(method string, handler RouterRequestHandler) err
 func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 	defer conn.Close()
 
-	workers := newWorkerPool(r.sendMaxWorkers)
 	var msgpackconn *msgpackrpc.Connection
 	msgpackconn = msgpackrpc.NewConnection(conn, conn,
 		func(ctx context.Context, _ msgpackrpc.FunctionLogger, method string, params []any, _res func(_result any, _err any)) {
@@ -125,32 +124,30 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 				}
 			}
 
-			workers.Go(func() {
-				// Check if the method is an internal method
-				if handler, ok := r.routesInternal[method]; ok {
-					// Call the internal method handler
-					handler(ctx, msgpackconn, params, res)
-					return
-				}
+			// Check if the method is an internal method
+			if handler, ok := r.routesInternal[method]; ok {
+				// Call the internal method handler
+				handler(ctx, msgpackconn, params, res)
+				return
+			}
 
-				// Check if the method is registered
-				client, ok := r.getConnectionForMethod(method)
-				if !ok {
-					res(nil, routerError(ErrCodeMethodNotAvailable, fmt.Sprintf("method %s not available", method)))
-					return
-				}
+			// Check if the method is registered
+			client, ok := r.getConnectionForMethod(method)
+			if !ok {
+				res(nil, routerError(ErrCodeMethodNotAvailable, fmt.Sprintf("method %s not available", method)))
+				return
+			}
 
-				// Forward the call to the registered client
-				reqResult, reqError, err := client.SendRequest(ctx, method, params...)
-				if err != nil {
-					slog.Error("Failed to send request", "method", method, "err", err)
-					res(nil, routerError(ErrCodeFailedToSendRequests, fmt.Sprintf("failed to send request: %s", err)))
-					return
-				}
+			// Forward the call to the registered client
+			reqResult, reqError, err := client.SendRequest(ctx, method, params...)
+			if err != nil {
+				slog.Error("Failed to send request", "method", method, "err", err)
+				res(nil, routerError(ErrCodeFailedToSendRequests, fmt.Sprintf("failed to send request: %s", err)))
+				return
+			}
 
-				// Send the response back to the original caller
-				res(reqResult, reqError)
-			})
+			// Send the response back to the original caller
+			res(reqResult, reqError)
 		},
 		func(_ msgpackrpc.FunctionLogger, method string, params []any) {
 			// This handler is called when a notification is received from the client
