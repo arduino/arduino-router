@@ -27,7 +27,9 @@ import (
 	"github.com/arduino/arduino-router/msgpackrpc"
 )
 
-type RouterRequestHandler func(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(result any, err any))
+type RouterRequestHandler func(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res RouterResponseHandler)
+
+type RouterResponseHandler func(result any, err any)
 
 type Router struct {
 	routesLock     sync.Mutex

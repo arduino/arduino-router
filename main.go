@@ -165,7 +165,7 @@ func startRouter(cfg Config) error {
 	hciapi.Register(router)
 
 	// Register monitor version API methods
-	if err := router.RegisterMethod("$/version", func(_ context.Context, _ *msgpackrpc.Connection, _ []any, res func(any, any)) {
+	if err := router.RegisterMethod("$/version", func(_ context.Context, _ *msgpackrpc.Connection, _ []any, res msgpackrouter.RouterResponseHandler) {
 		res(Version, nil)
 	}); err != nil {
 		slog.Error("Failed to register version API", "err", err)
@@ -182,7 +182,7 @@ func startRouter(cfg Config) error {
 		var serialOpened = sync.NewCond(&serialLock)
 		var serialClosed = sync.NewCond(&serialLock)
 		var serialCloseSignal = make(chan struct{})
-		err := router.RegisterMethod("$/serial/open", func(ctx context.Context, _ *msgpackrpc.Connection, params []any, res func(any, any)) {
+		err := router.RegisterMethod("$/serial/open", func(ctx context.Context, _ *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 			if len(params) != 1 {
 				res(nil, []any{1, "Invalid number of parameters"})
 				return
@@ -206,7 +206,7 @@ func startRouter(cfg Config) error {
 			res(true, nil)
 		})
 		f.Assert(err == nil, "Failed to register $/serial/open method")
-		err = router.RegisterMethod("$/serial/close", func(ctx context.Context, _ *msgpackrpc.Connection, params []any, res func(any, any)) {
+		err = router.RegisterMethod("$/serial/close", func(ctx context.Context, _ *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 			if len(params) != 1 {
 				res(nil, []any{1, "Invalid number of parameters"})
 				return

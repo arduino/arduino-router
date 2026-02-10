@@ -47,7 +47,7 @@ func Register(router *msgpackrouter.Router) {
 }
 
 // HCIOpen opens an HCI socket bound to the specified device (e.g. "hci0").
-func HCIOpen(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func HCIOpen(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 1 {
 		res(nil, []any{1, "Expected one parameter: HCI device name (e.g., 'hci0')"})
 		return
@@ -110,7 +110,7 @@ func HCIOpen(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res 
 }
 
 // HCIClose closes the currently open HCI socket.
-func HCIClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func HCIClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 0 {
 		res(nil, []any{1, "Expected no parameters"})
 		return
@@ -125,7 +125,7 @@ func HCIClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res
 }
 
 // HCISend transmits raw data to the open HCI socket.
-func HCISend(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func HCISend(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 1 {
 		res(nil, []any{1, "Expected one parameter: data to send"})
 		return
@@ -162,7 +162,7 @@ func HCISend(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res 
 }
 
 // HCIRecv reads available data from the HCI socket.
-func HCIRecv(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func HCIRecv(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 1 {
 		res(nil, []any{1, "Expected one parameter: max bytes to receive"})
 		return
@@ -208,7 +208,7 @@ func HCIRecv(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res 
 }
 
 // HCIAvail checks whether data is available to read on the HCI socket.
-func HCIAvail(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func HCIAvail(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 0 {
 		res(nil, []any{1, "Expected no parameters"})
 		return

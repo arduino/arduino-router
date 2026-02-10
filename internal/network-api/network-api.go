@@ -82,7 +82,7 @@ func takeLockAndGenerateNextID() (newID uint, unlock func()) {
 	}
 }
 
-func tcpConnect(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func tcpConnect(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 2 {
 		res(nil, []any{1, "Invalid number of parameters, expected server address and port"})
 		return
@@ -114,7 +114,7 @@ func tcpConnect(ctx context.Context, rpc *msgpackrpc.Connection, params []any, r
 	res(id, nil)
 }
 
-func tcpListen(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func tcpListen(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 2 {
 		res(nil, []any{1, "Invalid number of parameters, expected listen address and port"})
 		return
@@ -144,7 +144,7 @@ func tcpListen(ctx context.Context, rpc *msgpackrpc.Connection, params []any, re
 	res(id, nil)
 }
 
-func tcpAccept(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func tcpAccept(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 1 {
 		res(nil, []any{1, "Invalid number of parameters, expected listener ID"})
 		return
@@ -178,7 +178,7 @@ func tcpAccept(ctx context.Context, rpc *msgpackrpc.Connection, params []any, re
 	res(connID, nil)
 }
 
-func tcpClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func tcpClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 1 {
 		res(nil, []any{1, "Invalid number of parameters, expected connection ID"})
 		return
@@ -211,7 +211,7 @@ func tcpClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res
 	res("", nil)
 }
 
-func tcpCloseListener(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func tcpCloseListener(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 1 {
 		res(nil, []any{1, "Invalid number of parameters, expected listener ID"})
 		return
@@ -244,7 +244,7 @@ func tcpCloseListener(ctx context.Context, rpc *msgpackrpc.Connection, params []
 	res("", nil)
 }
 
-func tcpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func tcpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 2 && len(params) != 3 {
 		res(nil, []any{1, "Invalid number of parameters, expected (connection ID, max bytes to read[, optional timeout in ms])"})
 		return
@@ -295,7 +295,7 @@ func tcpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res 
 	res(buffer[:n], nil)
 }
 
-func tcpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func tcpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 2 {
 		res(nil, []any{1, "Invalid number of parameters, expected (connection ID, data to write)"})
 		return
@@ -332,7 +332,7 @@ func tcpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res
 	res(n, nil)
 }
 
-func tcpConnectSSL(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func tcpConnectSSL(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	n := len(params)
 	if n < 1 || n > 3 {
 		res(nil, []any{1, "Invalid number of parameters, expected server address, port and optional TLS cert"})
@@ -387,7 +387,7 @@ func tcpConnectSSL(ctx context.Context, rpc *msgpackrpc.Connection, params []any
 	res(id, nil)
 }
 
-func udpConnect(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func udpConnect(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 2 {
 		res(nil, []any{1, "Invalid number of parameters, expected server address and port"})
 		return
@@ -423,7 +423,7 @@ func udpConnect(ctx context.Context, rpc *msgpackrpc.Connection, params []any, r
 	res(id, nil)
 }
 
-func udpBeginPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func udpBeginPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 3 {
 		res(nil, []any{1, "Invalid number of parameters, expected udpConnId, dest address, dest port"})
 		return
@@ -461,7 +461,7 @@ func udpBeginPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []an
 	res(true, nil)
 }
 
-func udpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func udpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 2 {
 		res(nil, []any{1, "Invalid number of parameters, expected udpConnId, payload"})
 		return
@@ -495,7 +495,7 @@ func udpWrite(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res
 	res(len(data), nil)
 }
 
-func udpEndPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func udpEndPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 1 {
 		res(nil, []any{1, "Invalid number of parameters, expected expected udpConnId"})
 		return
@@ -533,7 +533,7 @@ func udpEndPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any,
 	}
 }
 
-func udpAwaitPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func udpAwaitPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 1 && len(params) != 2 {
 		res(nil, []any{1, "Invalid number of parameters, expected (UDP connection ID[, optional timeout in ms])"})
 		return
@@ -594,7 +594,7 @@ func udpAwaitPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []an
 	res([]any{n, host, port}, nil)
 }
 
-func udpDropPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func udpDropPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 1 && len(params) != 2 {
 		res(nil, []any{1, "Invalid number of parameters, expected (UDP connection ID[, optional timeout in ms])"})
 		return
@@ -615,7 +615,7 @@ func udpDropPacket(ctx context.Context, rpc *msgpackrpc.Connection, params []any
 	res(true, nil)
 }
 
-func udpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func udpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 2 && len(params) != 3 {
 		res(nil, []any{1, "Invalid number of parameters, expected (UDP connection ID, max bytes to read)"})
 		return
@@ -648,7 +648,7 @@ func udpRead(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res 
 	res(buffer[:n], nil)
 }
 
-func udpClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res func(_result any, _err any)) {
+func udpClose(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 1 {
 		res(nil, []any{1, "Invalid number of parameters, expected UDP connection ID"})
 		return
