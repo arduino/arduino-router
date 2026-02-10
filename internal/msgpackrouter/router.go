@@ -88,9 +88,9 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 		func(ctx context.Context, _ msgpackrpc.FunctionLogger, method string, params []any, _res func(_result any, _err any)) {
 			// This handler is called when a request is received from the client
 			slog.Debug("Received request", "method", method, "params", params)
-			res := func(_result any, _err any) {
-				slog.Debug("Received response", "method", method, "result", _result, "error", _err)
-				_res(_result, _err)
+			res := func(result any, err any) {
+				slog.Debug("Received response", "method", method, "result", result, "error", err)
+				_res(result, err)
 			}
 
 			switch method {
