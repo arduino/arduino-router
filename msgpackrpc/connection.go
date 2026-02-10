@@ -302,7 +302,7 @@ func (c *Connection) Close() {
 	_ = c.out.Close()
 }
 
-func (c *Connection) SendRequest(ctx context.Context, method string, params ...any) (reqResult any, reqError any, err error) {
+func (c *Connection) sendRequest(ctx context.Context, res ResponseHandler, async bool, method string, params ...any) error {
 	if params == nil {
 		params = []any{}
 	}
@@ -324,36 +324,59 @@ func (c *Connection) SendRequest(ctx context.Context, method string, params ...a
 		c.activeOutRequestsMutex.Lock()
 		delete(c.activeOutRequests, id)
 		c.activeOutRequestsMutex.Unlock()
-		return nil, nil, fmt.Errorf("sending request: %w", err)
+		return fmt.Errorf("sending request: %w", err)
 	}
 
-	// Wait the response or send cancel request if requested from context
-	var result *outResponse
-	select {
-	case result = <-resultChan:
-		// got result, do nothing
+	wait := func() {
+		// Wait the response or send cancel request if requested from context
+		var result *outResponse
+		select {
+		case result = <-resultChan:
+			// got result, do nothing
 
-	case <-ctx.Done():
-		c.activeOutRequestsMutex.Lock()
-		_, active := c.activeOutRequests[id]
-		c.activeOutRequestsMutex.Unlock()
-		if active {
-			c.loggerMutex.Lock()
-			c.logger.LogOutgoingCancelRequest(id)
-			c.loggerMutex.Unlock()
+		case <-ctx.Done():
+			c.activeOutRequestsMutex.Lock()
+			_, active := c.activeOutRequests[id]
+			c.activeOutRequestsMutex.Unlock()
+			if active {
+				c.loggerMutex.Lock()
+				c.logger.LogOutgoingCancelRequest(id)
+				c.loggerMutex.Unlock()
 
-			_ = c.SendNotification("$/cancelRequest", id) // ignore error (it won't matter anyway)
+				_ = c.SendNotification("$/cancelRequest", id) // ignore error (it won't matter anyway)
+			}
+
+			// After cancelation wait for result...
+			result = <-resultChan
 		}
 
-		// After cancelation wait for result...
-		result = <-resultChan
+		c.loggerMutex.Lock()
+		c.logger.LogIncomingResponse(id, method, result.reqResult, result.reqError)
+		c.loggerMutex.Unlock()
+
+		res(result.reqResult, result.reqError)
 	}
 
-	c.loggerMutex.Lock()
-	c.logger.LogIncomingResponse(id, method, result.reqResult, result.reqError)
-	c.loggerMutex.Unlock()
+	if async {
+		go wait()
+	} else {
+		wait()
+	}
+	return nil
+}
 
-	return result.reqResult, result.reqError, nil
+func (c *Connection) SendRequestWithAsyncResult(ctx context.Context, res ResponseHandler, method string, params ...any) error {
+	return c.sendRequest(ctx, res, true, method, params...)
+}
+
+func (c *Connection) SendRequest(ctx context.Context, method string, params ...any) (any, any, error) {
+	var reqResult, reqError any
+	res := func(result any, reqerr any) {
+		reqResult = result
+		reqError = reqerr
+	}
+	err := c.sendRequest(ctx, res, false, method, params...)
+	return reqResult, reqError, err
 }
 
 func (c *Connection) SendNotification(method string, params ...any) error {

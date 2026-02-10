@@ -141,15 +141,15 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			}
 
 			// Forward the call to the registered client
-			reqResult, reqError, err := client.SendRequest(ctx, method, params...)
+			err := client.SendRequestWithAsyncResult(
+				ctx,
+				res, // Send the response back to the original caller
+				method, params...)
 			if err != nil {
 				slog.Error("Failed to send request", "method", method, "err", err)
 				res(nil, routerError(ErrCodeFailedToSendRequests, fmt.Sprintf("failed to send request: %s", err)))
 				return
 			}
-
-			// Send the response back to the original caller
-			res(reqResult, reqError)
 		},
 		func(_ msgpackrpc.FunctionLogger, method string, params []any) {
 			// This handler is called when a notification is received from the client
