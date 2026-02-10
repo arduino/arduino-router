@@ -15,24 +15,24 @@
 
 package msgpackrouter
 
-type workerPool struct {
+type WorkerPool struct {
 	slots chan struct{}
 }
 
-// newWorkerPool creates a new worker pool with the specified size.
+// NewWorkerPool creates a new worker pool with the specified size.
 // If size is less than or equal to 0, it will be treated as 1 (single worker).
-func newWorkerPool(size int) *workerPool {
+func NewWorkerPool(size int) *WorkerPool {
 	if size <= 0 {
 		size = 1
 	}
-	return &workerPool{
+	return &WorkerPool{
 		slots: make(chan struct{}, size),
 	}
 }
 
 // Go starts a new worker to execute the given job function.
 // If the worker pool is full, it will block until a worker is available.
-func (p *workerPool) Go(job func()) {
+func (p *WorkerPool) Go(job func()) {
 	p.slots <- struct{}{}
 	go func() {
 		defer func() { <-p.slots }()
@@ -42,7 +42,7 @@ func (p *workerPool) Go(job func()) {
 
 // Wait blocks until all workers have completed their jobs.
 // No new workers are allowed to start after this method is called.
-func (p *workerPool) Wait() {
+func (p *WorkerPool) Wait() {
 	for i := 0; i < cap(p.slots); i++ {
 		p.slots <- struct{}{}
 	}
