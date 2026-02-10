@@ -84,7 +84,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 
 	var msgpackconn *msgpackrpc.Connection
 	msgpackconn = msgpackrpc.NewConnection(conn, conn,
-		func(ctx context.Context, _ msgpackrpc.FunctionLogger, method string, params []any, _res func(_result any, _err any)) {
+		func(ctx context.Context, _ msgpackrpc.FunctionLogger, method string, params []any, _res msgpackrpc.ResponseHandler) {
 			// This handler is called when a request is received from the client
 			slog.Debug("Received request", "method", method, "params", params)
 			res := func(result any, err any) {

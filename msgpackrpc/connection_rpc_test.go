@@ -45,7 +45,7 @@ func TestRPCConnection(t *testing.T) {
 	requestError := ""
 	conn := NewConnection(
 		in, out,
-		func(ctx context.Context, logger FunctionLogger, method string, params []any, res func(result any, err any)) {
+		func(ctx context.Context, logger FunctionLogger, method string, params []any, res ResponseHandler) {
 			go func() {
 				defer wg.Done()
 				request = fmt.Sprintf("REQ method=%v params=%v", method, params)
@@ -173,7 +173,7 @@ func TestRPCRougeDoubleCallWithSameID(t *testing.T) {
 	var wg sync.WaitGroup
 	conn := NewConnection(
 		in, out,
-		func(ctx context.Context, logger FunctionLogger, method string, params []any, res func(result any, err any)) {
+		func(ctx context.Context, logger FunctionLogger, method string, params []any, res ResponseHandler) {
 			go func() {
 				defer wg.Done()
 				reqLock.Lock()

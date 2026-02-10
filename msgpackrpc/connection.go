@@ -69,7 +69,10 @@ type outResponse struct {
 }
 
 // RequestHandler handles requests from a MessagePack-RPC Connection.
-type RequestHandler func(ctx context.Context, logger FunctionLogger, method string, params []any, cb func(result any, err any))
+type RequestHandler func(ctx context.Context, logger FunctionLogger, method string, params []any, res ResponseHandler)
+
+// ResponseHandler is a callback function used to send the result of a request back to the caller.
+type ResponseHandler func(result any, err any)
 
 // NotificationHandler handles notifications from a MessagePack-RPC Connection.
 type NotificationHandler func(logger FunctionLogger, method string, params []any)
@@ -84,7 +87,7 @@ func NewConnection(in io.ReadCloser, out io.WriteCloser, requestHandler RequestH
 	outEncoder := msgpack.NewEncoder(out)
 	outEncoder.UseCompactInts(true)
 	if requestHandler == nil {
-		requestHandler = func(ctx context.Context, logger FunctionLogger, method string, params []any, res func(result any, err any)) {
+		requestHandler = func(ctx context.Context, logger FunctionLogger, method string, params []any, res ResponseHandler) {
 			res(nil, fmt.Errorf("method not implemented: %s", method))
 		}
 	}
