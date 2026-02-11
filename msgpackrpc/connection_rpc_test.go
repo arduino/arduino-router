@@ -32,10 +32,6 @@ func TestRPCConnection(t *testing.T) {
 	testdataOut, out := nio.Pipe(buffer.New(1024))
 	d := msgpack.NewDecoder(testdataOut)
 	d.UseLooseInterfaceDecoding(true)
-	type CustomError struct {
-		Code    int
-		Message string
-	}
 
 	var wg sync.WaitGroup
 	notification := ""
