@@ -16,7 +16,6 @@
 package msgpackrouter
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -27,7 +26,7 @@ import (
 	"github.com/arduino/arduino-router/msgpackrpc"
 )
 
-type RouterRequestHandler func(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res RouterResponseHandler)
+type RouterRequestHandler func(rpc *msgpackrpc.Connection, params []any, res RouterResponseHandler)
 
 type RouterResponseHandler func(result any, err any)
 
@@ -75,7 +74,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 
 	var msgpackconn *msgpackrpc.Connection
 	msgpackconn = msgpackrpc.NewConnection(conn, conn,
-		func(ctx context.Context, _ msgpackrpc.FunctionLogger, method string, params []any, _res msgpackrpc.ResponseHandler) {
+		func(_ msgpackrpc.FunctionLogger, method string, params []any, _res msgpackrpc.ResponseHandler) {
 			// This handler is called when a request is received from the client
 			slog.Debug("Received request", "method", method, "params", params)
 			res := func(result any, err any) {
@@ -118,7 +117,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			// Check if the method is an internal method
 			if handler, ok := r.routesInternal[method]; ok {
 				// Call the internal method handler
-				handler(ctx, msgpackconn, params, res)
+				handler(msgpackconn, params, res)
 				return
 			}
 
@@ -131,7 +130,6 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 
 			// Forward the call to the registered client
 			err := client.SendRequestWithAsyncResult(
-				ctx,
 				res, // Send the response back to the original caller
 				method, params...)
 			if err != nil {
@@ -147,7 +145,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			// Check if the method is an internal method
 			if handler, ok := r.routesInternal[method]; ok {
 				// call the internal method handler (since it's a notification, discard the result)
-				handler(context.Background(), msgpackconn, params, func(_, _ any) {})
+				handler(msgpackconn, params, func(_, _ any) {})
 				return
 			}
 

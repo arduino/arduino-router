@@ -20,13 +20,3 @@ The protocol supported is defined here https://github.com/msgpack-rpc/msgpack-rp
   1. `type`: Fixed number `2` (to identify this message as a NOTIFICATION).
   2. `methods`: The method name.
   3. `params`: An array of the function parameters.
-
-### RPC Request cancelation support
-
-The MessagePack RPC protocol implemented in this package provides also a way for a client to cancel a REQUEST. To do so the client must send a NOTIFICATION to the `$/cancel` method with a single parameter matching the `msgid` of the REQUEST to cancel.
-
-```
-[2 "$/cancel" [ MSGID ]]
-```
-
-The server will send an interrupt to the subroutine handling the original REQUEST to inform that the client is no longer interested in the RESPONSE. The server could return immediately an empty RESPONSE with an "interrupted" error, or it may ignore the cancel notification, in this latter case the cancelation will not produce any visible effect.

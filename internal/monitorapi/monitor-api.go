@@ -16,7 +16,6 @@
 package monitorapi
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -86,7 +85,7 @@ func connectionHandler(listener net.Listener) {
 	}
 }
 
-func connected(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
+func connected(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 0 {
 		res(nil, []any{1, "Invalid number of parameters, expected no parameters"})
 		return
@@ -99,7 +98,7 @@ func connected(ctx context.Context, rpc *msgpackrpc.Connection, params []any, re
 	res(connected, nil)
 }
 
-func read(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
+func read(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 1 {
 		res(nil, []any{1, "Invalid number of parameters, expected max bytes to read"})
 		return
@@ -125,7 +124,7 @@ func read(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msg
 	}
 }
 
-func write(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
+func write(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 1 {
 		res(nil, []any{1, "Invalid number of parameters, expected data to write"})
 		return
@@ -173,7 +172,7 @@ func close(conn net.Conn) {
 	_ = conn.Close()
 }
 
-func reset(ctx context.Context, rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
+func reset(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 0 {
 		res(nil, []any{1, "Invalid number of parameters, expected no parameters"})
 		return

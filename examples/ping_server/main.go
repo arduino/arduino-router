@@ -35,7 +35,7 @@ func main() {
 	defer s.Close()
 
 	conn := msgpackrpc.NewConnection(s, s,
-		func(ctx context.Context, _ msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseHandler) {
+		func(_ msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseHandler) {
 			slog.Info("Received request", "method", method, "params", params)
 			if method == "ping" {
 				res(params, nil)

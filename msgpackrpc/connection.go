@@ -46,16 +46,9 @@ type Connection struct {
 	logger              Logger
 	loggerMutex         sync.Mutex
 
-	activeInRequests      map[MessageID]*inRequest
-	activeInRequestsMutex sync.Mutex
-
 	activeOutRequests      map[MessageID]*outRequest
 	activeOutRequestsMutex sync.Mutex
 	lastOutRequestsIndex   atomic.Uint32
-}
-
-type inRequest struct {
-	cancel func()
 }
 
 type outRequest struct {
@@ -64,9 +57,11 @@ type outRequest struct {
 }
 
 // RequestHandler handles requests from a MessagePack-RPC Connection.
-type RequestHandler func(ctx context.Context, logger FunctionLogger, method string, params []any, res ResponseHandler)
+type RequestHandler func(logger FunctionLogger, method string, params []any, res ResponseHandler)
 
-// ResponseHandler is a callback function used to send the result of a request back to the caller.
+// ResponseHandler is a callback function used to send the result of a request back
+// to the caller. It must be thread-safe (request handlers may decide to handle the request
+// asynchronously, calling the response handler from another goroutine when the result is ready).
 type ResponseHandler func(result any, err any)
 
 // NotificationHandler handles notifications from a MessagePack-RPC Connection.
@@ -82,7 +77,7 @@ func NewConnection(in io.ReadCloser, out io.WriteCloser, requestHandler RequestH
 	outEncoder := msgpack.NewEncoder(out)
 	outEncoder.UseCompactInts(true)
 	if requestHandler == nil {
-		requestHandler = func(ctx context.Context, logger FunctionLogger, method string, params []any, res ResponseHandler) {
+		requestHandler = func(logger FunctionLogger, method string, params []any, res ResponseHandler) {
 			res(nil, fmt.Errorf("method not implemented: %s", method))
 		}
 	}
@@ -103,7 +98,6 @@ func NewConnection(in io.ReadCloser, out io.WriteCloser, requestHandler RequestH
 		requestHandler:      requestHandler,
 		notificationHandler: notificationHandler,
 		errorHandler:        errorHandler,
-		activeInRequests:    map[MessageID]*inRequest{},
 		activeOutRequests:   map[MessageID]*outRequest{},
 		logger:              NullLogger{},
 	}
@@ -195,36 +189,13 @@ func (c *Connection) processIncomingMessage(data []any) error {
 }
 
 func (c *Connection) handleIncomingRequest(id MessageID, method string, params []any) {
-	ctx, cancel := context.WithCancel(context.Background())
-	req := &inRequest{cancel: cancel}
-
-	c.activeInRequestsMutex.Lock()
-	if overriddenReq := c.activeInRequests[id]; overriddenReq != nil {
-		// RPC protocol violation: there is already an active request with the same ID.
-		// Cancel the existing request and replace it with the new one
-		overriddenReq.cancel()
-		c.errorHandler(fmt.Errorf("RPC protocol violation: request with ID %v already active, canceling it", id))
-	}
-	c.activeInRequests[id] = req
-	c.activeInRequestsMutex.Unlock()
-
 	c.loggerMutex.Lock()
 	logger := c.logger.LogIncomingRequest(id, method, params)
 	c.loggerMutex.Unlock()
 
+	// This callback may be called by another goroutine, because the request handler
+	// may want to process the request asynchronously.
 	cb := func(reqResult, reqError any) {
-		var existing *inRequest
-		c.activeInRequestsMutex.Lock()
-		existing = c.activeInRequests[id]
-		if existing == req {
-			existing.cancel()
-			delete(c.activeInRequests, id)
-		}
-		c.activeInRequestsMutex.Unlock()
-		if existing != req {
-			return
-		}
-
 		c.loggerMutex.Lock()
 		c.logger.LogOutgoingResponse(id, method, reqResult, reqError)
 		c.loggerMutex.Unlock()
@@ -235,25 +206,10 @@ func (c *Connection) handleIncomingRequest(id MessageID, method string, params [
 		}
 	}
 
-	c.requestHandler(ctx, logger, method, params, cb)
+	c.requestHandler(logger, method, params, cb)
 }
 
 func (c *Connection) handleIncomingNotification(method string, params []any) {
-	if method == "$/cancelRequest" {
-		// Send cancelation signal and exit
-		if len(params) != 1 {
-			c.errorHandler(fmt.Errorf("invalid cancelRequest, expected array with 1 element"))
-			return
-		}
-		id, ok := ToUint(params[0])
-		if !ok {
-			c.errorHandler(fmt.Errorf("invalid cancelRequest, expected msgid (uint) as first element"))
-			return
-		}
-		c.cancelIncomingRequest(MessageID(id))
-		return
-	}
-
 	c.loggerMutex.Lock()
 	logger := c.logger.LogIncomingNotification(method, params)
 	c.loggerMutex.Unlock()
@@ -281,89 +237,66 @@ func (c *Connection) handleIncomingResponse(id MessageID, reqError any, reqResul
 	req.res(reqResult, reqError)
 }
 
-func (c *Connection) cancelIncomingRequest(id MessageID) {
-	c.activeInRequestsMutex.Lock()
-	if req, ok := c.activeInRequests[id]; ok {
-		c.loggerMutex.Lock()
-		c.logger.LogIncomingCancelRequest(id)
-		c.loggerMutex.Unlock()
-
-		req.cancel()
-	}
-	c.activeInRequestsMutex.Unlock()
-}
-
 func (c *Connection) Close() {
 	_ = c.in.Close()
 	_ = c.out.Close()
 }
 
-func (c *Connection) sendRequest(ctx context.Context, res ResponseHandler, async bool, method string, params ...any) error {
+func (c *Connection) sendRequest(method string, params []any, res ResponseHandler) (MessageID, error) {
 	if params == nil {
 		params = []any{}
 	}
 	id := MessageID(c.lastOutRequestsIndex.Add(1))
 
+	c.activeOutRequestsMutex.Lock()
+	c.activeOutRequests[id] = &outRequest{
+		method: method,
+		res:    res,
+	}
+	c.activeOutRequestsMutex.Unlock()
+
 	c.loggerMutex.Lock()
 	c.logger.LogOutgoingRequest(id, method, params)
 	c.loggerMutex.Unlock()
-
-	var done chan struct{}
-	outRequest := &outRequest{method: method}
-	if !async {
-		done = make(chan struct{})
-		outRequest.res = func(result any, err any) {
-			res(result, err)
-			close(done)
-		}
-	} else {
-		outRequest.res = res
-	}
-
-	c.activeOutRequestsMutex.Lock()
-	c.activeOutRequests[id] = outRequest
-	c.activeOutRequestsMutex.Unlock()
 
 	if err := c.send(messageTypeRequest, id, method, params); err != nil {
 		c.activeOutRequestsMutex.Lock()
 		delete(c.activeOutRequests, id)
 		c.activeOutRequestsMutex.Unlock()
-		return fmt.Errorf("sending request: %w", err)
+		return 0, fmt.Errorf("sending request: %w", err)
 	}
 
-	if !async {
-		select {
-		case <-done:
-		case <-ctx.Done():
-			c.activeOutRequestsMutex.Lock()
-			_, active := c.activeOutRequests[id]
-			c.activeOutRequestsMutex.Unlock()
-			if active {
-				c.loggerMutex.Lock()
-				c.logger.LogOutgoingCancelRequest(id)
-				c.loggerMutex.Unlock()
-
-				_ = c.SendNotification("$/cancelRequest", id) // ignore error (it won't matter anyway)
-			}
-			<-done
-		}
-	}
-
-	return nil
+	return id, nil
 }
 
-func (c *Connection) SendRequestWithAsyncResult(ctx context.Context, res ResponseHandler, method string, params ...any) error {
-	return c.sendRequest(ctx, res, true, method, params...)
+func (c *Connection) SendRequestWithAsyncResult(res ResponseHandler, method string, params ...any) error {
+	_, err := c.sendRequest(method, params, res)
+	return err
 }
 
 func (c *Connection) SendRequest(ctx context.Context, method string, params ...any) (any, any, error) {
 	var reqResult, reqError any
-	res := func(result any, reqerr any) {
+	done := make(chan struct{})
+	id, err := c.sendRequest(method, params, func(result any, err any) {
 		reqResult = result
-		reqError = reqerr
+		reqError = err
+		close(done)
+	})
+	if err != nil {
+		return nil, nil, err
 	}
-	err := c.sendRequest(ctx, res, false, method, params...)
-	return reqResult, reqError, err
+
+	select {
+	case <-done:
+		// OK
+	case <-ctx.Done():
+		c.loggerMutex.Lock()
+		c.logger.LogOutgoingCancelRequest(id)
+		c.loggerMutex.Unlock()
+		return nil, nil, ctx.Err()
+	}
+
+	return reqResult, reqError, nil
 }
 
 func (c *Connection) SendNotification(method string, params ...any) error {
