@@ -59,13 +59,8 @@ type inRequest struct {
 }
 
 type outRequest struct {
-	resultChan chan<- *outResponse
-	method     string
-}
-
-type outResponse struct {
-	reqError  any
-	reqResult any
+	res    ResponseHandler
+	method string
 }
 
 // RequestHandler handles requests from a MessagePack-RPC Connection.
@@ -279,10 +274,11 @@ func (c *Connection) handleIncomingResponse(id MessageID, reqError any, reqResul
 		return
 	}
 
-	req.resultChan <- &outResponse{
-		reqError:  reqError,
-		reqResult: reqResult,
-	}
+	c.loggerMutex.Lock()
+	c.logger.LogIncomingResponse(id, req.method, reqResult, reqError)
+	c.loggerMutex.Unlock()
+
+	req.res(reqResult, reqError)
 }
 
 func (c *Connection) cancelIncomingRequest(id MessageID) {
@@ -312,12 +308,20 @@ func (c *Connection) sendRequest(ctx context.Context, res ResponseHandler, async
 	c.logger.LogOutgoingRequest(id, method, params)
 	c.loggerMutex.Unlock()
 
-	resultChan := make(chan *outResponse, 1)
-	c.activeOutRequestsMutex.Lock()
-	c.activeOutRequests[id] = &outRequest{
-		resultChan: resultChan,
-		method:     method,
+	var done chan struct{}
+	outRequest := &outRequest{method: method}
+	if !async {
+		done = make(chan struct{})
+		outRequest.res = func(result any, err any) {
+			res(result, err)
+			close(done)
+		}
+	} else {
+		outRequest.res = res
 	}
+
+	c.activeOutRequestsMutex.Lock()
+	c.activeOutRequests[id] = outRequest
 	c.activeOutRequestsMutex.Unlock()
 
 	if err := c.send(messageTypeRequest, id, method, params); err != nil {
@@ -327,13 +331,9 @@ func (c *Connection) sendRequest(ctx context.Context, res ResponseHandler, async
 		return fmt.Errorf("sending request: %w", err)
 	}
 
-	wait := func() {
-		// Wait the response or send cancel request if requested from context
-		var result *outResponse
+	if !async {
 		select {
-		case result = <-resultChan:
-			// got result, do nothing
-
+		case <-done:
 		case <-ctx.Done():
 			c.activeOutRequestsMutex.Lock()
 			_, active := c.activeOutRequests[id]
@@ -345,23 +345,10 @@ func (c *Connection) sendRequest(ctx context.Context, res ResponseHandler, async
 
 				_ = c.SendNotification("$/cancelRequest", id) // ignore error (it won't matter anyway)
 			}
-
-			// After cancelation wait for result...
-			result = <-resultChan
+			<-done
 		}
-
-		c.loggerMutex.Lock()
-		c.logger.LogIncomingResponse(id, method, result.reqResult, result.reqError)
-		c.loggerMutex.Unlock()
-
-		res(result.reqResult, result.reqError)
 	}
 
-	if async {
-		go wait()
-	} else {
-		wait()
-	}
 	return nil
 }
 
