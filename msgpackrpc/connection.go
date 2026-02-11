@@ -44,7 +44,6 @@ type Connection struct {
 	requestHandler      RequestHandler
 	notificationHandler NotificationHandler
 	logger              Logger
-	loggerMutex         sync.Mutex
 
 	activeOutRequests      map[MessageID]*outRequest
 	activeOutRequestsMutex sync.Mutex
@@ -103,10 +102,11 @@ func NewConnection(in io.ReadCloser, out io.WriteCloser, requestHandler RequestH
 	}
 }
 
+// SetLogger sets the logger for the connection.
+// It is NOT safe to call this method while the connection is running,
+// it should be called before starting the connection with Run method.
 func (c *Connection) SetLogger(l Logger) {
-	c.loggerMutex.Lock()
 	c.logger = l
-	c.loggerMutex.Unlock()
 }
 
 func (c *Connection) Run() {
@@ -124,9 +124,7 @@ func (c *Connection) Run() {
 			data = s
 		}
 		elapsed := time.Since(start)
-		c.loggerMutex.Lock()
 		c.logger.LogIncomingDataDelay(elapsed)
-		c.loggerMutex.Unlock()
 
 		if err := c.processIncomingMessage(data); err != nil {
 			c.errorHandler(err)
@@ -189,16 +187,12 @@ func (c *Connection) processIncomingMessage(data []any) error {
 }
 
 func (c *Connection) handleIncomingRequest(id MessageID, method string, params []any) {
-	c.loggerMutex.Lock()
 	logger := c.logger.LogIncomingRequest(id, method, params)
-	c.loggerMutex.Unlock()
 
 	// This callback may be called by another goroutine, because the request handler
 	// may want to process the request asynchronously.
 	cb := func(reqResult, reqError any) {
-		c.loggerMutex.Lock()
 		c.logger.LogOutgoingResponse(id, method, reqResult, reqError)
-		c.loggerMutex.Unlock()
 
 		if err := c.send(messageTypeResponse, id, reqError, reqResult); err != nil {
 			c.errorHandler(fmt.Errorf("error sending response: %w", err))
@@ -210,10 +204,7 @@ func (c *Connection) handleIncomingRequest(id MessageID, method string, params [
 }
 
 func (c *Connection) handleIncomingNotification(method string, params []any) {
-	c.loggerMutex.Lock()
 	logger := c.logger.LogIncomingNotification(method, params)
-	c.loggerMutex.Unlock()
-
 	c.notificationHandler(logger, method, params)
 }
 
@@ -230,9 +221,7 @@ func (c *Connection) handleIncomingResponse(id MessageID, reqError any, reqResul
 		return
 	}
 
-	c.loggerMutex.Lock()
 	c.logger.LogIncomingResponse(id, req.method, reqResult, reqError)
-	c.loggerMutex.Unlock()
 
 	req.res(reqResult, reqError)
 }
@@ -255,9 +244,7 @@ func (c *Connection) sendRequest(method string, params []any, res ResponseHandle
 	}
 	c.activeOutRequestsMutex.Unlock()
 
-	c.loggerMutex.Lock()
 	c.logger.LogOutgoingRequest(id, method, params)
-	c.loggerMutex.Unlock()
 
 	if err := c.send(messageTypeRequest, id, method, params); err != nil {
 		c.activeOutRequestsMutex.Lock()
@@ -290,9 +277,7 @@ func (c *Connection) SendRequest(ctx context.Context, method string, params ...a
 	case <-done:
 		// OK
 	case <-ctx.Done():
-		c.loggerMutex.Lock()
 		c.logger.LogOutgoingCancelRequest(id)
-		c.loggerMutex.Unlock()
 		return nil, nil, ctx.Err()
 	}
 
@@ -304,9 +289,7 @@ func (c *Connection) SendNotification(method string, params ...any) error {
 		params = []any{}
 	}
 
-	c.loggerMutex.Lock()
 	c.logger.LogOutgoingNotification(method, params)
-	c.loggerMutex.Unlock()
 
 	if err := c.send(messageTypeNotification, method, params); err != nil {
 		return fmt.Errorf("sending notification: %w", err)
@@ -326,8 +309,6 @@ func (c *Connection) send(data ...any) error {
 
 	elapsed := time.Since(start)
 
-	c.loggerMutex.Lock()
 	c.logger.LogOutgoingDataDelay(elapsed)
-	c.loggerMutex.Unlock()
 	return nil
 }

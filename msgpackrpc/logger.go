@@ -19,6 +19,8 @@ import (
 	"time"
 )
 
+// Logger is an interface for logging outgoing and incoming requests, responses, and notifications.
+// All methods of this interface must be thread-safe.
 type Logger interface {
 	LogOutgoingRequest(id MessageID, method string, params []any)
 	LogIncomingRequest(id MessageID, method string, params []any) FunctionLogger
@@ -32,8 +34,10 @@ type Logger interface {
 	LogOutgoingDataDelay(time.Duration)
 }
 
+// FunctionLogger is an interface for logging additional information about the
+// processing of a request or notification. It must be thread-safe.
 type FunctionLogger interface {
-	Logf(format string, a ...interface{})
+	Logf(format string, a ...any)
 }
 
 type NullLogger struct{}
@@ -64,7 +68,7 @@ func (NullLogger) LogOutgoingCancelRequest(id MessageID) {}
 
 type NullFunctionLogger struct{}
 
-func (NullFunctionLogger) Logf(format string, a ...interface{}) {}
+func (NullFunctionLogger) Logf(format string, a ...any) {}
 
 func (NullLogger) LogIncomingDataDelay(time.Duration) {}
 
