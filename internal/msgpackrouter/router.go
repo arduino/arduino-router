@@ -46,17 +46,6 @@ func New(perConnMaxWorkers int) *Router {
 	}
 }
 
-// SetSendMaxWorkers sets the maximum number of workers for sending on each connection,
-// this value limits the number of concurrent requests that can be sent on each connection.
-// A value of 0 means unlimited workers.
-// Only new connections will be affected by this change, existing connections
-// will keep their current sendMaxWorkers value.
-func (r *Router) SetSendMaxWorkers(size int) {
-	r.routesLock.Lock()
-	defer r.routesLock.Unlock()
-	r.sendMaxWorkers = size
-}
-
 func (r *Router) Accept(conn io.ReadWriteCloser) <-chan struct{} {
 	res := make(chan struct{})
 	go func() {
