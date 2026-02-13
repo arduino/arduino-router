@@ -1,0 +1,8 @@
+[default]
+log_level = "info"
+listen_port = ""  # disable TCP listener
+unix_port = "/var/run/arduino-router.sock"
+
+[imola]
+serial_port = "/dev/ttyHS1"
+serial_baudrate = 115200

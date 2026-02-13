@@ -3,6 +3,7 @@ module github.com/arduino/arduino-router
 go 1.25
 
 require (
+	github.com/BurntSushi/toml v1.6.0
 	github.com/arduino/go-paths-helper v1.14.0
 	github.com/davecgh/go-spew v1.1.1
 	github.com/djherbis/buffer v1.2.0
