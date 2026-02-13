@@ -23,6 +23,7 @@ import (
 	"log/slog"
 	"net"
 	"os"
+	"os/exec"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -44,12 +45,14 @@ var Version string = "0.0.0-dev"
 
 // Server configuration
 type Config struct {
-	LogLevel        slog.Level
-	ListenTCPAddr   string
-	ListenUnixAddr  string
-	SerialPortAddr  string
-	SerialBaudRate  int
-	MonitorPortAddr string
+	LogLevel                    slog.Level
+	ListenTCPAddr               string
+	ListenUnixAddr              string
+	ExecCommand                 string
+	SerialPortAddr              string
+	SerialBaudRate              int
+	MonitorPortAddr             string
+	MaxPendingRequestsPerClient int
 }
 
 func main() {
@@ -76,6 +79,7 @@ func main() {
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
 	cmd.Flags().StringVarP(&cfg.ListenTCPAddr, "listen-port", "l", "", "Listening port for RPC services")
 	cmd.Flags().StringVarP(&cfg.ListenUnixAddr, "unix-port", "u", "/var/run/arduino-router.sock", "Listening port for RPC services")
+	cmd.Flags().StringVarP(&cfg.ExecCommand, "exec", "e", "", "Execute a command after the router is ready)")
 	cmd.Flags().StringVarP(&cfg.SerialPortAddr, "serial-port", "p", "", "Serial port address")
 	cmd.Flags().IntVarP(&cfg.SerialBaudRate, "serial-baudrate", "b", 115200, "Serial port baud rate")
 	cmd.Flags().StringVarP(&cfg.MonitorPortAddr, "monitor-port", "m", "127.0.0.1:7500", "Listening port for MCU monitor proxy")
@@ -280,6 +284,21 @@ func startRouter(cfg Config) error {
 
 				slog.Info("Accepted connection", "addr", conn.RemoteAddr())
 				router.Accept(conn)
+			}
+		}()
+	}
+
+	// Open serial port if specified
+	if cfg.ExecCommand != "" {
+		go func() {
+			// #nosec G204
+			cmd := exec.Command("sh", "-c", cfg.ExecCommand)
+			err := cmd.Run()
+
+			if err != nil {
+				slog.Warn("Failed to execute command", "command", cfg.ExecCommand, "err", err)
+			} else {
+				slog.Info("Executed command successfully", "command", cfg.ExecCommand)
 			}
 		}()
 	}
