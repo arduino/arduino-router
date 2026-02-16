@@ -13,6 +13,8 @@
 // Arduino software without disclosing the source code of your own applications.
 // To purchase a commercial license, send an email to license@arduino.cc.
 
+//go:build linux
+
 package hciapi
 
 import (
@@ -39,15 +41,15 @@ func init() {
 
 // Register registers the HCI API methods with the router.
 func Register(router *msgpackrouter.Router) {
-	_ = router.RegisterMethod("hci/open", HCIOpen)
-	_ = router.RegisterMethod("hci/send", HCISend)
-	_ = router.RegisterMethod("hci/recv", HCIRecv)
-	_ = router.RegisterMethod("hci/avail", HCIAvail)
-	_ = router.RegisterMethod("hci/close", HCIClose)
+	_ = router.RegisterMethod("hci/open", hciOpen)
+	_ = router.RegisterMethod("hci/send", hciSend)
+	_ = router.RegisterMethod("hci/recv", hciRecv)
+	_ = router.RegisterMethod("hci/avail", hciAvail)
+	_ = router.RegisterMethod("hci/close", hciClose)
 }
 
 // HCIOpen opens an HCI socket bound to the specified device (e.g. "hci0").
-func HCIOpen(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
+func hciOpen(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 1 {
 		res(nil, []any{1, "Expected one parameter: HCI device name (e.g., 'hci0')"})
 		return
@@ -110,7 +112,7 @@ func HCIOpen(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterR
 }
 
 // HCIClose closes the currently open HCI socket.
-func HCIClose(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
+func hciClose(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 0 {
 		res(nil, []any{1, "Expected no parameters"})
 		return
@@ -125,7 +127,7 @@ func HCIClose(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Router
 }
 
 // HCISend transmits raw data to the open HCI socket.
-func HCISend(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
+func hciSend(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 1 {
 		res(nil, []any{1, "Expected one parameter: data to send"})
 		return
@@ -162,7 +164,7 @@ func HCISend(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterR
 }
 
 // HCIRecv reads available data from the HCI socket.
-func HCIRecv(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
+func hciRecv(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 1 {
 		res(nil, []any{1, "Expected one parameter: max bytes to receive"})
 		return
@@ -208,7 +210,7 @@ func HCIRecv(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterR
 }
 
 // HCIAvail checks whether data is available to read on the HCI socket.
-func HCIAvail(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
+func hciAvail(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	if len(params) != 0 {
 		res(nil, []any{1, "Expected no parameters"})
 		return
