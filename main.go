@@ -345,8 +345,6 @@ func ParseConfig[T any](base T, cfgPath string) (T, error) {
 		return base, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
-	fmt.Printf("Parsed config: %+v\n", tomlCfg)
-
 	// overrides with default values.
 	if defaultCfg, ok := tomlCfg["default"]; ok {
 		base = defaultCfg
