@@ -288,7 +288,6 @@ func startRouter(cfg Config) error {
 		}()
 	}
 
-	// Open serial port if specified
 	if cfg.ExecCommand != "" {
 		go func() {
 			// #nosec G204
