@@ -23,7 +23,6 @@ import (
 	"log/slog"
 	"net"
 	"os"
-	"os/exec"
 	"os/signal"
 	"sync"
 	"syscall"
@@ -34,6 +33,7 @@ import (
 	"github.com/arduino/arduino-router/internal/msgpackrouter"
 	networkapi "github.com/arduino/arduino-router/internal/network-api"
 	"github.com/arduino/arduino-router/msgpackrpc"
+	"github.com/arduino/go-paths-helper"
 
 	"github.com/spf13/cobra"
 	"go.bug.st/f"
@@ -291,9 +291,15 @@ func startRouter(cfg Config) error {
 	if cfg.ExecCommand != "" {
 		go func() {
 			// #nosec G204
-			cmd := exec.Command("sh", "-c", cfg.ExecCommand)
-			err := cmd.Run()
-
+			p, err := paths.NewProcess(nil, "sh", "-c", cfg.ExecCommand)
+			if err != nil {
+				slog.Error("Failed to create process for exec command", "command", cfg.ExecCommand, "err", err)
+				return
+			}
+			if err := p.Start(); err != nil {
+				slog.Error("Failed to start exec command", "command", cfg.ExecCommand, "err", err)
+				return
+			}
 			if err != nil {
 				slog.Warn("Failed to execute command", "command", cfg.ExecCommand, "err", err)
 			} else {
