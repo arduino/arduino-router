@@ -1,0 +1,24 @@
+#!/bin/bash
+
+# $1 = output directory passed by systemd generator that is 1.normal-dir
+OUT="$1"
+DROPIN="$OUT/arduino-router.service.d"
+mkdir -p "$DROPIN"
+
+PRODUCT=$(cat /sys/class/dmi/id/product_name 2>/dev/null)
+
+if [[ "$PRODUCT" == "Imola" ]]; then
+    cat > "$DROPIN/override.conf" <<EOF
+[Service]
+ExecStart=
+ExecStart=/usr/bin/arduino-router --unix-port /var/run/arduino-router.sock --serial-port /dev/ttyHS1 --serial-baudrate 9600
+EOF
+
+elif [[ "$PRODUCT" == "UNOQ" ]]; then
+    cat > "$DROPIN/override.conf" <<EOF
+[Service]
+ExecStart=
+ExecStart=/usr/bin/arduino-router --unix-port /var/run/arduino-router.sock --serial-port /dev/ttyHS2 --serial-baudrate 115200
+EOF
+
+fi

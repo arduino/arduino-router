@@ -1,5 +1,9 @@
 #!/bin/sh
 
+chmod +x /etc/systemd/system-generators/router-sys-conf
+
+systemctl daemon-reload 
+
 systemctl enable arduino-router
 systemctl enable arduino-router-serial
 
