@@ -1,7 +1,7 @@
 [Unit]
 Description=Arduino Router Service
-After=network-online.target
-Wants=network-online.target
+After=socket.target
+Wants=socket.target
 Requires=
 
 [Service]
@@ -10,6 +10,9 @@ ExecStartPre=-/usr/bin/gpioset -c /dev/gpiochip1 -t0 37=0
 ExecStart=/usr/bin/arduino-router --unix-port /var/run/arduino-router.sock --serial-port /dev/ttyHS1 --serial-baudrate 115200
 # End the boot animation after the router is started.
 ExecStartPost=/usr/bin/gpioset -c /dev/gpiochip1 -t0 70=1
+# Restart the boot aninamtion if the router is stopped.
+ExecStopPost=/usr/bin/gpioset -c /dev/gpiochip1 -t0 70=0
+ExecStopPost=/usr/bin/gpioset -c /dev/gpiochip1 -t0 38=0
 StandardOutput=journal
 StandardError=journal
 Restart=always
