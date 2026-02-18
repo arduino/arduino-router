@@ -1,7 +1,7 @@
 [Unit]
 Description=Arduino Router Service
-After=socket.target
-Wants=socket.target
+After=network.target
+Wants=network.target
 Requires=
 
 [Service]
