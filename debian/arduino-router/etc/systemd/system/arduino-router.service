@@ -13,6 +13,7 @@ ExecStartPost=/usr/bin/gpioset -c /dev/gpiochip1 -t0 70=1
 # Restart the boot aninamtion if the router is stopped.
 ExecStopPost=/usr/bin/gpioset -c /dev/gpiochip1 -t0 70=0
 ExecStopPost=/usr/bin/gpioset -c /dev/gpiochip1 -t0 38=0
+ExecStopPost=/usr/bin/gpioset -c /dev/gpiochip1 -t0 38=1
 StandardOutput=journal
 StandardError=journal
 Restart=always
