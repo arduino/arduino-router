@@ -5,15 +5,7 @@ Wants=network.target
 Requires=
 
 [Service]
-# Put the micro in a ready state.
-ExecStartPre=-/usr/bin/gpioset -c /dev/gpiochip1 -t0 37=0
-ExecStart=/usr/bin/arduino-router --unix-port /var/run/arduino-router.sock --serial-port /dev/ttyHS1 --serial-baudrate 115200
-# End the boot animation after the router is started.
-ExecStartPost=/usr/bin/gpioset -c /dev/gpiochip1 -t0 70=1
-# Restart the boot aninamtion if the router is stopped.
-ExecStopPost=/usr/bin/gpioset -c /dev/gpiochip1 -t0 70=0
-ExecStopPost=/usr/bin/gpioset -c /dev/gpiochip1 -t0 38=0
-ExecStopPost=/usr/bin/gpioset -c /dev/gpiochip1 -t0 38=1
+ExecStart=/usr/bin/arduino-router --unix-port /var/run/arduino-router.sock
 StandardOutput=journal
 StandardError=journal
 Restart=always
@@ -21,3 +13,4 @@ RestartSec=3
 
 [Install]
 WantedBy=multi-user.target
+
