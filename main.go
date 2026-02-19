@@ -44,13 +44,12 @@ var Version string = "0.0.0-dev"
 
 // Server configuration
 type Config struct {
-	LogLevel                    slog.Level
-	ListenTCPAddr               string
-	ListenUnixAddr              string
-	SerialPortAddr              string
-	SerialBaudRate              int
-	MonitorPortAddr             string
-	MaxPendingRequestsPerClient int
+	LogLevel        slog.Level
+	ListenTCPAddr   string
+	ListenUnixAddr  string
+	SerialPortAddr  string
+	SerialBaudRate  int
+	MonitorPortAddr string
 }
 
 func main() {
@@ -80,7 +79,6 @@ func main() {
 	cmd.Flags().StringVarP(&cfg.SerialPortAddr, "serial-port", "p", "", "Serial port address")
 	cmd.Flags().IntVarP(&cfg.SerialBaudRate, "serial-baudrate", "b", 115200, "Serial port baud rate")
 	cmd.Flags().StringVarP(&cfg.MonitorPortAddr, "monitor-port", "m", "127.0.0.1:7500", "Listening port for MCU monitor proxy")
-	cmd.Flags().IntVarP(&cfg.MaxPendingRequestsPerClient, "max-pending-requests", "", 25, "Maximum number of pending requests per client connection (0 = unlimited)")
 	cmd.AddCommand(&cobra.Command{
 		Use:  "version",
 		Long: "Print version information",
@@ -155,7 +153,7 @@ func startRouter(cfg Config) error {
 	}
 
 	// Run router
-	router := msgpackrouter.New(cfg.MaxPendingRequestsPerClient)
+	router := msgpackrouter.New()
 
 	// Register TCP network API methods
 	networkapi.Register(router)

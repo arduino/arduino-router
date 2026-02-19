@@ -34,14 +34,12 @@ type Router struct {
 	routesLock     sync.Mutex
 	routes         map[string]*msgpackrpc.Connection
 	routesInternal map[string]RouterRequestHandler
-	sendMaxWorkers int
 }
 
-func New(perConnMaxWorkers int) *Router {
+func New() *Router {
 	return &Router{
 		routes:         make(map[string]*msgpackrpc.Connection),
 		routesInternal: make(map[string]RouterRequestHandler),
-		sendMaxWorkers: perConnMaxWorkers,
 	}
 }
 

@@ -92,7 +92,7 @@ func TestBasicRouterFunctionality(t *testing.T) {
 	})
 	go cl2.Run()
 
-	router := msgpackrouter.New(0)
+	router := msgpackrouter.New()
 	router.Accept(ch1b)
 	router.Accept(ch2b)
 
@@ -163,12 +163,11 @@ func TestBasicRouterFunctionality(t *testing.T) {
 
 func TestMessageForwarderCongestionControl(t *testing.T) {
 	// Test parameters
-	queueSize := 5
 	msgLatency := 100 * time.Millisecond
 	// Run a batch of 20 requests, and expect them to take more than 400 ms
 	// in total because the router should throttle requests in batch of 5.
-	batchSize := queueSize * 4
-	expectedLatency := msgLatency * time.Duration(batchSize/queueSize)
+	batchSize := 4
+	expectedLatency := msgLatency * time.Duration(batchSize)
 
 	// Make a client that simulates a slow response
 	ch1a, ch1b := newFullPipe()
@@ -184,7 +183,7 @@ func TestMessageForwarderCongestionControl(t *testing.T) {
 	go cl2.Run()
 
 	// Setup router
-	router := msgpackrouter.New(queueSize) // max 5 pending messages per connection
+	router := msgpackrouter.New() // max 5 pending messages per connection
 	router.Accept(ch1b)
 	router.Accept(ch2b)
 
