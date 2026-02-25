@@ -28,12 +28,13 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/arduino/go-paths-helper"
+
 	"github.com/arduino/arduino-router/internal/hciapi"
 	"github.com/arduino/arduino-router/internal/monitorapi"
 	"github.com/arduino/arduino-router/internal/msgpackrouter"
 	networkapi "github.com/arduino/arduino-router/internal/network-api"
 	"github.com/arduino/arduino-router/msgpackrpc"
-	"github.com/arduino/go-paths-helper"
 
 	"github.com/spf13/cobra"
 	"go.bug.st/f"
@@ -45,14 +46,13 @@ var Version string = "0.0.0-dev"
 
 // Server configuration
 type Config struct {
-	LogLevel                    slog.Level
-	ListenTCPAddr               string
-	ListenUnixAddr              string
-	ExecCommand                 string
-	SerialPortAddr              string
-	SerialBaudRate              int
-	MonitorPortAddr             string
-	MaxPendingRequestsPerClient int
+	LogLevel        slog.Level
+	ListenTCPAddr   string
+	ListenUnixAddr  string
+	ExecCommand     string
+	SerialPortAddr  string
+	SerialBaudRate  int
+	MonitorPortAddr string
 }
 
 func main() {
