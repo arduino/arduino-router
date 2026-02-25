@@ -292,12 +292,12 @@ func startRouter(cfg Config) error {
 		go func() {
 			// #nosec G204
 			p, err := paths.NewProcess(nil, "sh", "-c", cfg.ExecCommand)
-			p.RedirectStderrTo(io.Discard)
-			p.RedirectStdoutTo(io.Discard)
 			if err != nil {
 				slog.Error("Failed to create process for exec command", "command", cfg.ExecCommand, "err", err)
 				return
 			}
+			p.RedirectStderrTo(io.Discard)
+			p.RedirectStdoutTo(io.Discard)
 			if err := p.Run(); err != nil {
 				slog.Error("Failed to start exec command", "command", cfg.ExecCommand, "err", err)
 				return
