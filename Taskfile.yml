@@ -89,6 +89,11 @@ tasks:
       - adb push ./build/arduino-router_*_arm64.deb /tmp/
       - ./scripts/run-remote-sudo.sh "dpkg -i /tmp/arduino-router_*_arm64.deb && needrestart -r a"
 
+  license:update:
+    desc: Update license headers in Go files
+    cmds:
+      - addlicense -c "(C) Arduino s.r.l. and/or its affiliated companies" -f ./license_header.tpl $(find . -name "*.go" -type f -print0 | xargs -0)
+
   update-deb-copyright:
     desc: Extract project and dependency licenses into asd copyright
     cmds:
