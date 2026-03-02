@@ -162,7 +162,7 @@ func TestRPCMessageMaxSize(t *testing.T) {
 	)
 
 	// Set a very small max message size to trigger the error
-	require.NoError(t, conn.SetMaxOutgoingMessageSize(16))
+	conn.SetMaxOutgoingMessageSize(16)
 
 	// Start the connection loop
 	go conn.Run()

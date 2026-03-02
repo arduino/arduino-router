@@ -119,19 +119,17 @@ func (c *Connection) SetLogger(l Logger) {
 
 // SetMaxOutgoingMessageSize sets the maximum buffer size for outgoing messages (default is no limit).
 // A value <= 0 means no limit.
-func (c *Connection) SetMaxOutgoingMessageSize(size int) error {
+func (c *Connection) SetMaxOutgoingMessageSize(size int) {
 	c.outMutex.Lock()
 	defer c.outMutex.Unlock()
 
 	if size <= 0 {
 		// No limits
 		c.msgpBuffer = nil
-		return nil
 	}
 
 	// Set the buffer and error to be used when a message exceeds the limit
 	c.msgpBuffer = NewLimitedBuffer(size)
-	return nil
 }
 
 func (c *Connection) Run() {
