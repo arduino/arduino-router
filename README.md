@@ -8,7 +8,9 @@ To understand more about MessagePack encoding see: <https://msgpack.org/>
 
 This module provides also a MessagePack RPC client in the `msgpackrpc` package. To get more details about MessagePack RPC and this implementation see [here](msgpackrpc/README.md).
 
-### Methods implemented in the Router
+## Functions implemented in the Router
+
+### `$/register <METHOD_NAME>`
 
 The Router implements a single `$/register` method that is used by a client to register the RPC calls it wants to expose. A single string parameter is required in the call: the method name to register.
 
@@ -29,7 +31,7 @@ After the method is registered another client may perform an RPC request to that
 
 Note that the request ID has been remapped by the Router: it keeps track of all active requests so the message IDs will not conflict between different clients.
 
-### Calling an unregistered method
+#### Calling an unregistered method
 
 A request to a non-registered method will result in an error:
 
@@ -38,7 +40,11 @@ A request to a non-registered method will result in an error:
 | Client A does an RPC call to the Router<br>`[REQUEST, 33, "xxxx", [1, true]]` >>                            |
 | The Router didn't know how to handle the request<br> `[RESPONSE, 33, "method xxxx not available", null]` << |
 
-### Unregistering methods (via `$/reset` method call)
+#### Unregistering methods via client disconnection
+
+When a client disconnects all the registered methods from that client are dropped.
+
+### `$/reset` un-registering methods
 
 A client can drop all its registered methods by calling the `$/reset` method, with an empty parameter list.
 
@@ -47,13 +53,9 @@ A client can drop all its registered methods by calling the `$/reset` method, wi
 | Clian A request to remove all registered methods<br>`[REQUEST, 52, "$/reset", []]` >> |
 | The Router should always succeed<br> `[RESPONSE, 52, null, true]` <<                  |
 
-### Unregistering methods (via client disconnection)
+### `$/serial/open` and `$/serial/close` to manage the Router's serial connection
 
-When a client disconnects all the registered methods from that client are dropped.
-
-### Router serial connection
-
-The MsgPack RPC Router can establish a physical connection with a serial port. This connection can register and call RPC methods as any other network TCP/IP connection. The serial port address is specified via the command line flag `-p PORT`, if this flag is set the Router will try to open the serial port at startup.
+The MsgPack RPC Router can establish a physical connection with a serial port. This connection can register and call RPC methods as any other network connection. The serial port address is specified via the command line flag `-p PORT`, if this flag is set the Router will try to open the serial port at startup.
 
 If the serial port fails for some reason, the router will retry to connect automatically after 5 seconds.
 
