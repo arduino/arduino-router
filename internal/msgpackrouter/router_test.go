@@ -70,7 +70,7 @@ func TestBasicRouterFunctionality(t *testing.T) {
 	cl1NotificationsMux := sync.Mutex{}
 	cl1Notifications := bytes.NewBuffer(nil)
 
-	cl1 := msgpackrpc.NewConnection(ch1a, ch1a, func(logger msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseHandler) {
+	cl1 := msgpackrpc.NewConnection(ch1a, ch1a, func(logger msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseSender) {
 		switch method {
 		case "ping":
 			res(params, nil)
@@ -85,7 +85,7 @@ func TestBasicRouterFunctionality(t *testing.T) {
 	})
 	go cl1.Run()
 
-	cl2 := msgpackrpc.NewConnection(ch2a, ch2a, func(logger msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseHandler) {
+	cl2 := msgpackrpc.NewConnection(ch2a, ch2a, func(logger msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseSender) {
 		res(nil, nil)
 	}, func(logger msgpackrpc.FunctionLogger, method string, params []any) {
 	}, func(err error) {
@@ -171,7 +171,7 @@ func TestMessageForwarderCongestionControl(t *testing.T) {
 
 	// Make a client that simulates a slow response
 	ch1a, ch1b := newFullPipe()
-	cl1 := msgpackrpc.NewConnection(ch1a, ch1a, func(logger msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseHandler) {
+	cl1 := msgpackrpc.NewConnection(ch1a, ch1a, func(logger msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseSender) {
 		time.Sleep(msgLatency)
 		res(true, nil)
 	}, nil, nil)

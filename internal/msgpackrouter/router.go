@@ -72,42 +72,48 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 
 	var msgpackconn *msgpackrpc.Connection
 	msgpackconn = msgpackrpc.NewConnection(conn, conn,
-		func(_ msgpackrpc.FunctionLogger, method string, params []any, _res msgpackrpc.ResponseHandler) {
+		func(_ msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseSender) {
 			// This handler is called when a request is received from the client
 			slog.Debug("Received request", "method", method, "params", params)
-			res := func(result any, err any) {
-				slog.Debug("Received response", "method", method, "result", result, "error", err)
-				_res(result, err)
+
+			fwdRes := func(reqResult any, reqErr any) {
+				// This handler is used to send the response back to the original caller.
+				slog.Debug("Received response", "method", method, "result", reqResult, "error", reqErr)
+
+				err := res(reqResult, reqErr)
+				if err != nil {
+					slog.Error("Error sending response", "err", err)
+				}
 			}
 
 			switch method {
 			case "$/register":
 				// Check if the client is trying to register a new method
 				if len(params) != 1 {
-					res(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params))))
+					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params))))
 					return
 				} else if methodToRegister, ok := params[0].(string); !ok {
-					res(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: expected string, got %T", params[0])))
+					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: expected string, got %T", params[0])))
 					return
 				} else if err := r.registerMethod(methodToRegister, msgpackconn); err != nil {
 					if rae, ok := err.(*RouteError); ok {
-						res(nil, rae.ToEncodedError())
+						fwdRes(nil, rae.ToEncodedError())
 						return
 					}
-					res(nil, routerError(ErrCodeGenericError, err.Error()))
+					fwdRes(nil, routerError(ErrCodeGenericError, err.Error()))
 					return
 				} else {
-					res(true, nil)
+					fwdRes(true, nil)
 					return
 				}
 			case "$/reset":
 				// Check if the client is trying to remove its registered methods
 				if len(params) != 0 {
-					res(nil, routerError(ErrCodeInvalidParams, "invalid params: no params are expected"))
+					fwdRes(nil, routerError(ErrCodeInvalidParams, "invalid params: no params are expected"))
 					return
 				} else {
 					r.removeMethodsFromConnection(msgpackconn)
-					res(true, nil)
+					fwdRes(true, nil)
 					return
 				}
 			}
@@ -115,24 +121,24 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			// Check if the method is an internal method
 			if handler, ok := r.routesInternal[method]; ok {
 				// Call the internal method handler
-				handler(msgpackconn, params, res)
+				handler(msgpackconn, params, fwdRes)
 				return
 			}
 
 			// Check if the method is registered
 			client, ok := r.getConnectionForMethod(method)
 			if !ok {
-				res(nil, routerError(ErrCodeMethodNotAvailable, fmt.Sprintf("method %s not available", method)))
+				fwdRes(nil, routerError(ErrCodeMethodNotAvailable, fmt.Sprintf("method %s not available", method)))
 				return
 			}
 
 			// Forward the call to the registered client
 			err := client.SendRequestWithAsyncResult(
-				res, // Send the response back to the original caller
+				fwdRes, // Send the response back to the original caller
 				method, params...)
 			if err != nil {
 				slog.Error("Failed to send request", "method", method, "err", err)
-				res(nil, routerError(ErrCodeFailedToSendRequests, fmt.Sprintf("failed to send request: %s", err)))
+				fwdRes(nil, routerError(ErrCodeFailedToSendRequests, fmt.Sprintf("failed to send request: %s", err)))
 				return
 			}
 		},
