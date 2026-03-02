@@ -73,9 +73,9 @@ func TestBasicRouterFunctionality(t *testing.T) {
 	cl1 := msgpackrpc.NewConnection(ch1a, ch1a, func(logger msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseSender) {
 		switch method {
 		case "ping":
-			res(params, nil)
+			_ = res(params, nil)
 		default:
-			res(nil, "unknown method: "+method)
+			_ = res(nil, "unknown method: "+method)
 		}
 	}, func(logger msgpackrpc.FunctionLogger, method string, params []any) {
 		cl1NotificationsMux.Lock()
@@ -86,7 +86,7 @@ func TestBasicRouterFunctionality(t *testing.T) {
 	go cl1.Run()
 
 	cl2 := msgpackrpc.NewConnection(ch2a, ch2a, func(logger msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseSender) {
-		res(nil, nil)
+		_ = res(nil, nil)
 	}, func(logger msgpackrpc.FunctionLogger, method string, params []any) {
 	}, func(err error) {
 	})
@@ -173,7 +173,7 @@ func TestMessageForwarderCongestionControl(t *testing.T) {
 	ch1a, ch1b := newFullPipe()
 	cl1 := msgpackrpc.NewConnection(ch1a, ch1a, func(logger msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseSender) {
 		time.Sleep(msgLatency)
-		res(true, nil)
+		_ = res(true, nil)
 	}, nil, nil)
 	go cl1.Run()
 
@@ -216,9 +216,9 @@ func TestRouterMaxMsgSize(t *testing.T) {
 	ch1a, ch1b := newFullPipe()
 	cl1 := msgpackrpc.NewConnection(ch1a, ch1a, func(logger msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseSender) {
 		if method == "n" {
-			res(true, nil)
+			_ = res(true, nil)
 		} else {
-			res(make([]byte, 160), nil) // return a response that exceeds the limit
+			_ = res(make([]byte, 160), nil) // return a response that exceeds the limit
 		}
 	}, func(logger msgpackrpc.FunctionLogger, method string, params []any) {
 		fmt.Println("Received notification", "method", method, "params", params)

@@ -84,7 +84,7 @@ func NewConnection(in io.ReadCloser, out io.WriteCloser, requestHandler RequestH
 	msgpEncoder.UseCompactInts(true)
 	if requestHandler == nil {
 		requestHandler = func(logger FunctionLogger, method string, params []any, res ResponseSender) {
-			res(nil, fmt.Errorf("method not implemented: %s", method))
+			_ = res(nil, fmt.Errorf("method not implemented: %s", method))
 		}
 	}
 	if notificationHandler == nil {

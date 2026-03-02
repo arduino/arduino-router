@@ -39,23 +39,23 @@ func main() {
 			slog.Info("Received request", "method", method, "params", params)
 			if method == "mult" {
 				if len(params) != 2 {
-					res(nil, "invalid params")
+					_ = res(nil, "invalid params")
 					return
 				}
 				a, ok := params[0].(float64)
 				if !ok {
-					res(nil, "invalid param type, expected float64")
+					_ = res(nil, "invalid param type, expected float64")
 					return
 				}
 				b, ok := params[1].(float64)
 				if !ok {
-					res(nil, "invalid param type, expected float64")
+					_ = res(nil, "invalid param type, expected float64")
 					return
 				}
-				res(a*b, nil)
+				_ = res(a*b, nil)
 				return
 			}
-			res(nil, "method not found: "+method)
+			_ = res(nil, "method not found: "+method)
 		},
 		nil,
 		nil,

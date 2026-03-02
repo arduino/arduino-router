@@ -45,7 +45,7 @@ func TestRPCConnection(t *testing.T) {
 			go func() {
 				defer wg.Done()
 				request = fmt.Sprintf("REQ method=%v params=%v", method, params)
-				res([]any{}, nil)
+				_ = res([]any{}, nil)
 			}()
 		},
 		func(logger FunctionLogger, method string, params []any) {
