@@ -211,3 +211,80 @@ func TestMessageForwarderCongestionControl(t *testing.T) {
 	fmt.Println("Elapsed time for requests:", elapsed)
 	require.Greater(t, elapsed, expectedLatency, "Expected elapsed time to be greater than %s", expectedLatency)
 }
+
+func TestRouterMaxMsgSize(t *testing.T) {
+	ch1a, ch1b := newFullPipe()
+	cl1 := msgpackrpc.NewConnection(ch1a, ch1a, func(logger msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseSender) {
+		if method == "n" {
+			res(true, nil)
+		} else {
+			res(make([]byte, 160), nil) // return a response that exceeds the limit
+		}
+	}, func(logger msgpackrpc.FunctionLogger, method string, params []any) {
+		fmt.Println("Received notification", "method", method, "params", params)
+		arg := params[0].(string)
+		require.LessOrEqual(t, len(arg), 128)
+	}, nil)
+	go cl1.Run()
+
+	ch2a, ch2b := newFullPipe()
+	cl2 := msgpackrpc.NewConnection(ch2a, ch2a, nil, nil, nil)
+	go cl2.Run()
+
+	router := msgpackrouter.New()
+	router.Accept(ch1b)
+	router.Accept(ch2b)
+
+	// Register a method on the first client
+	{
+		result, reqErr, err := cl1.SendRequest(t.Context(), "$/register", "n")
+		require.Equal(t, true, result)
+		require.Nil(t, reqErr)
+		require.NoError(t, err)
+	}
+	{
+		result, reqErr, err := cl1.SendRequest(t.Context(), "$/register", "y")
+		require.Equal(t, true, result)
+		require.Nil(t, reqErr)
+		require.NoError(t, err)
+	}
+
+	// Set a max message size
+	{
+		result, reqErr, err := cl1.SendRequest(context.Background(), "$/setMaxMsgSize", 20)
+		require.Nil(t, result)
+		require.Equal(t, []any{int8(1), "invalid params: max buffer size must be greater than 127"}, reqErr)
+		require.NoError(t, err)
+	}
+	{
+		result, reqErr, err := cl1.SendRequest(context.Background(), "$/setMaxMsgSize", 128)
+		require.Equal(t, true, result)
+		require.Nil(t, reqErr)
+		require.NoError(t, err)
+	}
+
+	// Try to send a notification that exceeds the limit
+	{
+		result, reqErr, err := cl2.SendRequest(context.Background(), "n", string(make([]byte, 160)))
+		require.Nil(t, result)
+		require.Equal(t, []any{int8(6), "message size exceeds the limit"}, reqErr)
+		require.NoError(t, err)
+	}
+	{
+		require.NoError(t, cl2.SendNotification("n", string("ciao!")))
+		require.NoError(t, cl2.SendNotification("n", string(make([]byte, 160))))
+	}
+
+	{
+		result, reqErr, err := cl2.SendRequest(context.Background(), "$/setMaxMsgSize", 128)
+		require.Equal(t, true, result)
+		require.Nil(t, reqErr)
+		require.NoError(t, err)
+	}
+	{
+		result, reqErr, err := cl2.SendRequest(context.Background(), "y")
+		require.Nil(t, result)
+		require.Equal(t, []any{int8(6), "message size exceeds the limit"}, reqErr)
+		require.NoError(t, err)
+	}
+}

@@ -63,3 +63,13 @@ The Router has a RPC methods to "open" and "close" the serial connection on requ
 
 - The `$/serial/open` method will open the serial port connection. This method returns immediately.
 - The `$/serial/close` method will close the serial port connection. This method returns only after the port has been successfully disconnected.
+
+### `$/setMaxMsgSize <MAX_SIZE_IN_BYTES>` sets the maximum message size allowed by the Router
+
+A call to this method sets the maximum size of a message (in bytes) that the Router will allow to pass-through.
+
+After setting the maximum size:
+
+- If a CALL message exceeds the maximum size: an error response is returned immediately, and the call is not forwarded.
+- If a NOTIFICATION message exceeds the maximum size: the notification is ignored and not forwarded.
+- If a RESPONSE message exceeds the maximum size: the response is ignored and an error message is returned to the caller instead of the response.

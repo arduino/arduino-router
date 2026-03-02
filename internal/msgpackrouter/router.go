@@ -81,6 +81,10 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 				slog.Debug("Received response", "method", method, "result", reqResult, "error", reqErr)
 
 				err := res(reqResult, reqErr)
+				if errors.Is(err, &msgpackrpc.ErrBufferLimitExceeded{}) {
+					slog.Error("Response exceeded buffer limit", "method", method)
+					err = res(nil, routerError(ErrCodeBufferLimitExceeded, "message size exceeds the limit"))
+				}
 				if err != nil {
 					slog.Error("Error sending response", "err", err)
 				}
@@ -116,6 +120,22 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 					fwdRes(true, nil)
 					return
 				}
+			case "$/setMaxMsgSize":
+				// Fix the buffer size for the connection, if a bigger message is received, it will be rejected
+				if len(params) != 1 {
+					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params))))
+					return
+				} else if maxBuffSize, ok := msgpackrpc.ToInt(params[0]); !ok {
+					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: expected int, got %T", params[0])))
+					return
+				} else if maxBuffSize <= 127 {
+					fwdRes(nil, routerError(ErrCodeInvalidParams, "invalid params: max buffer size must be greater than 127"))
+					return
+				} else {
+					msgpackconn.SetMaxOutgoingMessageSize(maxBuffSize)
+					fwdRes(true, nil)
+					return
+				}
 			}
 
 			// Check if the method is an internal method
@@ -136,6 +156,11 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			err := client.SendRequestWithAsyncResult(
 				fwdRes, // Send the response back to the original caller
 				method, params...)
+			if errors.Is(err, &msgpackrpc.ErrBufferLimitExceeded{}) {
+				slog.Error("Request exceeded buffer limit", "method", method)
+				fwdRes(nil, routerError(ErrCodeBufferLimitExceeded, "message size exceeds the limit"))
+				return
+			}
 			if err != nil {
 				slog.Error("Failed to send request", "method", method, "err", err)
 				fwdRes(nil, routerError(ErrCodeFailedToSendRequests, fmt.Sprintf("failed to send request: %s", err)))
