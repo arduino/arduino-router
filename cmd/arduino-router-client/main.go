@@ -40,7 +40,7 @@ func main() {
 			"  <METHOD> is the method name to request/notify,\n" +
 			"  <ARG> are the arguments to pass to the method:\n" +
 			"      - Use 'true', 'false' for boolean\n" +
-			"      - Use 'null' for null.\n" +
+			"      - Use 'nil' for nil.\n" +
 			"      - Use integer values directly (e.g., 42).\n" +
 			"      - Use the 'f32:' or 'f64:' prefix for floating point values (e.g. f32:3.14159).\n" +
 			"      - Use '[' and ']' to start and end an array.\n" +
@@ -109,7 +109,7 @@ func composeArgs(args []string) (any, []string, error) {
 	if len(args) == 0 {
 		return nil, nil, fmt.Errorf("no arguments provided")
 	}
-	if args[0] == "null" {
+	if args[0] == "nil" {
 		return nil, args[1:], nil
 	}
 	if args[0] == "true" {
@@ -233,7 +233,7 @@ func encode(v any) []string {
 	}
 	switch val := v.(type) {
 	case nil:
-		return []string{"null"}
+		return []string{"nil"}
 	case bool:
 		return []string{fmt.Sprint(val)}
 	case int:
