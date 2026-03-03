@@ -74,18 +74,18 @@ func main() {
 			}
 
 			if notification {
-				fmt.Printf("Sending notification for method '%s', with parameters:\n", method)
+				fmt.Printf("Sending notification for method '%s', with parameters: ", method)
 			} else {
-				fmt.Printf("Sending request for method '%s', with parameters:\n", method)
+				fmt.Printf("Sending request for method '%s', with parameters: ", method)
 			}
 			print(args)
 			if !notification {
 				if rpcErr != nil {
-					fmt.Println("Got RPC error response:")
+					fmt.Print("Got RPC error: ")
 					print(rpcErr)
 				}
 				if rpcResp != nil {
-					fmt.Println("Got RPC response:")
+					fmt.Print("Got RPC response: ")
 					print(rpcResp)
 				}
 			}
@@ -245,6 +245,9 @@ func encode(v any) []string {
 	case string:
 		return []string{fmt.Sprintf("%q", val)}
 	case []any:
+		if len(val) == 0 {
+			return []string{"[ ]"}
+		}
 		result := []string{"["}
 		for _, elem := range val {
 			result = append(result, indent(encode(elem))...)
@@ -252,6 +255,9 @@ func encode(v any) []string {
 		result = append(result, "]")
 		return result
 	case map[any]any:
+		if len(val) == 0 {
+			return []string{"{ }"}
+		}
 		result := []string{"{"}
 		for k, v := range val {
 			key := indent(encode(k))
