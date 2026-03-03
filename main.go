@@ -49,7 +49,7 @@ type Config struct {
 	LogLevel        slog.Level
 	ListenTCPAddr   string
 	ListenUnixAddr  string
-	ExecCommand     string
+	AfterReadyCommand string
 	SerialPortAddr  string
 	SerialBaudRate  int
 	MonitorPortAddr string
