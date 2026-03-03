@@ -171,6 +171,23 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			// This handler is called when a notification is received from the client
 			slog.Debug("Received notification", "method", method, "params", params)
 
+			if method == "$/setMaxMsgSize" {
+				// Fix the buffer size for the connection, if a bigger message is received, it will be rejected
+				if len(params) != 1 {
+					slog.Error(fmt.Sprintf("invalid params: only one param is expected, got %d", len(params)))
+					return
+				} else if maxBuffSize, ok := msgpackrpc.ToInt(params[0]); !ok {
+					slog.Error(fmt.Sprintf("invalid params: expected int, got %T", params[0]))
+					return
+				} else if maxBuffSize <= 127 {
+					slog.Error("invalid params: max buffer size must be greater than 127")
+					return
+				} else {
+					msgpackconn.SetMaxOutgoingMessageSize(maxBuffSize)
+					return
+				}
+			}
+
 			// Check if the method is an internal method
 			if handler, ok := r.routesInternal[method]; ok {
 				// call the internal method handler (since it's a notification, discard the result)
