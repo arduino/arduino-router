@@ -7,7 +7,7 @@ package msgpack_test
 
 import (
 	"bytes"
-	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/arduino/arduino-router/msgpack"
@@ -20,36 +20,60 @@ func TestBooleanConstants(t *testing.T) {
 	require.Equal(t, msgpack.NewBool(false), msgpack.False)
 }
 
-func TestOneByteElementsDecoder(t *testing.T) {
+func TestOneByteElements(t *testing.T) {
 	t.Run("Nil", func(t *testing.T) {
-		// Test nil
-		in := bytes.NewBuffer([]byte{0xc0}) // nil
+		t.Run("Decode", func(t *testing.T) {
+			in := bytes.NewBuffer([]byte{0xc0}) // nil
 
-		v, err := msgpack.Decode(in)
-		require.NoError(t, err)
-		require.Equal(t, v.Kind(), msgpack.ValueKindNil)
-		_, ok := v.(msgpack.Nil)
-		require.True(t, ok)
-		require.Equal(t, "nil", v.String())
+			v, err := msgpack.Decode(in)
+			require.NoError(t, err)
+			require.Equal(t, v.Kind(), msgpack.ValueKindNil)
+			_, ok := v.(msgpack.Nil)
+			require.True(t, ok)
+			require.Equal(t, "nil", v.String())
+		})
+		t.Run("Encode", func(t *testing.T) {
+			e, err := msgpack.Marshal(msgpack.NewNil())
+			require.NoError(t, err)
+			require.Equal(t, []byte{0xc0}, e)
+			e, err = msgpack.Marshal(nil)
+			require.NoError(t, err)
+			require.Equal(t, []byte{0xc0}, e)
+		})
 	})
 
 	t.Run("Booleans", func(t *testing.T) {
-		// Test booleans
-		in := bytes.NewBuffer([]byte{0xc2, 0xc3}) // false, true
+		t.Run("Decode", func(t *testing.T) {
+			in := bytes.NewBuffer([]byte{0xc2, 0xc3}) // false, true
 
-		v, err := msgpack.Decode(in)
-		require.NoError(t, err)
-		require.Equal(t, v.Kind(), msgpack.ValueKindBool)
-		bv := v.(msgpack.Bool)
-		require.False(t, bool(bv))
-		require.Equal(t, "false", v.String())
+			v, err := msgpack.Decode(in)
+			require.NoError(t, err)
+			require.Equal(t, v.Kind(), msgpack.ValueKindBool)
+			bv := v.(msgpack.Bool)
+			require.False(t, bool(bv))
+			require.Equal(t, "false", v.String())
 
-		v, err = msgpack.Decode(in)
-		require.NoError(t, err)
-		require.Equal(t, v.Kind(), msgpack.ValueKindBool)
-		bv = v.(msgpack.Bool)
-		require.True(t, bool(bv))
-		require.Equal(t, "true", v.String())
+			v, err = msgpack.Decode(in)
+			require.NoError(t, err)
+			require.Equal(t, v.Kind(), msgpack.ValueKindBool)
+			bv = v.(msgpack.Bool)
+			require.True(t, bool(bv))
+			require.Equal(t, "true", v.String())
+		})
+		t.Run("Encode", func(t *testing.T) {
+			e, err := msgpack.Marshal(msgpack.False)
+			require.NoError(t, err)
+			require.Equal(t, []byte{0xc2}, e)
+			e, err = msgpack.Marshal(false)
+			require.NoError(t, err)
+			require.Equal(t, []byte{0xc2}, e)
+			e, err = msgpack.Marshal(msgpack.True)
+			require.NoError(t, err)
+			require.Equal(t, []byte{0xc3}, e)
+			e, err = msgpack.Marshal(true)
+			require.NoError(t, err)
+			require.Equal(t, []byte{0xc3}, e)
+		})
 	})
 
 	t.Run("OneByteIntegers", func(t *testing.T) {
@@ -83,6 +107,10 @@ func TestOneByteElementsDecoder(t *testing.T) {
 				require.Equal(t, uint64(i), ivuint64)
 				require.True(t, ok)
 			}
+
+			e, err := msgpack.Marshal(v)
+			require.NoError(t, err)
+			require.Equal(t, []byte{byte(i)}, e)
 		}
 		for i := -32; i < 0; i++ {
 			v, err := msgpack.Decode(in)
@@ -104,43 +132,58 @@ func TestOneByteElementsDecoder(t *testing.T) {
 				_, ok := iv.Uint64()
 				require.False(t, ok)
 			}
+
+			e, err := msgpack.Marshal(v)
+			require.NoError(t, err)
+			require.Equal(t, []byte{byte(0x100 + i)}, e)
 		}
 	})
 }
 
-func TestUnsignedIntegersDecode(t *testing.T) {
+func TestUnsignedIntegers(t *testing.T) {
 	t.Run("UnsignedIntegers", func(t *testing.T) {
 		// Test uints
-		in := bytes.NewBuffer([]byte{
-			0xcc, 0x11,
-			0xcd, 0x11, 0x22,
-			0xce, 0x11, 0x22, 0x33, 0x44,
-			0xcf, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
-		})
-		expectedStrings := []string{
-			"17", "4386", "287454020", "1234605616436508552",
-		}
-		for i, expected := range []uint64{0x11, 0x1122, 0x11223344, 0x1122334455667788} {
+		for _, test := range []struct {
+			data     []byte
+			expected uint64
+			str      string
+			reencode []byte
+		}{
+			{[]byte{0xcc, 0x11}, 0x11, "17", []byte{0x11}},
+			{[]byte{0xcd, 0x11, 0x22}, 0x1122, "4386", []byte{0xd1, 0x11, 0x22}},
+			{[]byte{0xd1, 0x11, 0x22}, 0x1122, "4386", []byte{0xd1, 0x11, 0x22}},
+			{[]byte{0xce, 0x11, 0x22, 0x33, 0x44}, 0x11223344, "287454020", []byte{0xd2, 0x11, 0x22, 0x33, 0x44}},
+			{[]byte{0xd2, 0x11, 0x22, 0x33, 0x44}, 0x11223344, "287454020", []byte{0xd2, 0x11, 0x22, 0x33, 0x44}},
+			{[]byte{0xcf, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88}, 0x1122334455667788, "1234605616436508552", []byte{0xd3, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88}},
+			{[]byte{0xd3, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88}, 0x1122334455667788, "1234605616436508552", []byte{0xd3, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88}},
+		} {
+			in := bytes.NewBuffer(test.data)
 			v, err := msgpack.Decode(in)
 			require.NoError(t, err)
 			require.Equal(t, v.Kind(), msgpack.ValueKindInteger)
 			iv := v.(msgpack.Integer)
 			require.True(t, iv.IsSigned())
 			vi, ok := iv.Int()
-			require.Equal(t, int(expected), vi)
+			require.Equal(t, int(test.expected), vi)
 			require.True(t, ok)
 			ui, ok := iv.Uint64()
-			require.Equal(t, uint64(expected), ui)
+			require.Equal(t, test.expected, ui)
 			require.True(t, ok)
 			ii, ok := iv.Int64()
-			require.Equal(t, int64(expected), ii)
+			if test.expected <= math.MaxInt64 {
+				require.Equal(t, int64(test.expected), ii)
+			} else {
+				require.FailNow(t, "invalid test: expected value %v does not fit in int64", test.expected)
+			}
 			require.True(t, ok)
-			require.Equal(t, expectedStrings[i], v.String())
+			require.Equal(t, test.str, v.String())
+
+			e, err := msgpack.Marshal(v)
+			require.NoError(t, err)
+			require.Equal(t, test.reencode, e)
 		}
 		{
-			in := bytes.NewBuffer([]byte{
-				0xcf, 0xFF, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
-			})
+			in := bytes.NewBuffer([]byte{0xcf, 0xFF, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88})
 			expected := uint64(0xFF22334455667788)
 			v, err := msgpack.Decode(in)
 			require.NoError(t, err)
@@ -155,6 +198,10 @@ func TestUnsignedIntegersDecode(t *testing.T) {
 			_, ok = iv.Int64()
 			require.False(t, ok)
 			require.Equal(t, "18384312997463357320", v.String())
+
+			e, err := msgpack.Marshal(v)
+			require.NoError(t, err)
+			require.Equal(t, []byte{0xcf, 0xFF, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88}, e)
 		}
 	})
 
@@ -179,46 +226,47 @@ func TestUnsignedIntegersDecode(t *testing.T) {
 	})
 }
 
-func TestSignedIntegersDecode(t *testing.T) {
+func TestSignedIntegers(t *testing.T) {
 	t.Run("SignedIntegers", func(t *testing.T) {
-		// Test ints
-		in := bytes.NewBuffer([]byte{
-			0xd0, 0x11,
-			0xd0, 0xee,
-			0xd1, 0x11, 0x22,
-			0xd1, 0xee, 0xdd,
-			0xd2, 0x11, 0x22, 0x33, 0x44,
-			0xd2, 0xee, 0xdd, 0xcc, 0xbb,
-			0xd3, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88,
-			0xd3, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77,
-		})
-		expectedStrings := []string{
-			"17", "-18",
-			"4386", "-4387",
-			"287454020", "-287454021",
-			"1234605616436508552", "-1234605616436508553",
-		}
-		expectedInts := []int64{17, -18, 4386, -4387, 287454020, -287454021, 1234605616436508552, -1234605616436508553}
-		for i, expected := range expectedInts {
+		for _, test := range []struct {
+			data     []byte
+			expected int64
+			str      string
+			reencode []byte
+		}{
+			{[]byte{0xd0, 0x11}, 17, "17", []byte{0x11}},
+			{[]byte{0xd0, 0xee}, -18, "-18", []byte{0xee}},
+			{[]byte{0xd1, 0x11, 0x22}, 4386, "4386", []byte{0xd1, 0x11, 0x22}},
+			{[]byte{0xd1, 0xee, 0xdd}, -4387, "-4387", []byte{0xd1, 0xee, 0xdd}},
+			{[]byte{0xd2, 0x11, 0x22, 0x33, 0x44}, 287454020, "287454020", []byte{0xd2, 0x11, 0x22, 0x33, 0x44}},
+			{[]byte{0xd2, 0xee, 0xdd, 0xcc, 0xbb}, -287454021, "-287454021", []byte{0xd2, 0xee, 0xdd, 0xcc, 0xbb}},
+			{[]byte{0xd3, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88}, 1234605616436508552, "1234605616436508552", []byte{0xd3, 0x11, 0x22, 0x33, 0x44, 0x55, 0x66, 0x77, 0x88}},
+			{[]byte{0xd3, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77}, -1234605616436508553, "-1234605616436508553", []byte{0xd3, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88, 0x77}},
+		} {
+			in := bytes.NewBuffer(test.data)
 			v, err := msgpack.Decode(in)
 			require.NoError(t, err)
 			require.Equal(t, v.Kind(), msgpack.ValueKindInteger)
 			iv := v.(msgpack.Integer)
 			require.True(t, iv.IsSigned())
 			vi, ok := iv.Int64()
-			require.Equal(t, expected, vi)
+			require.Equal(t, test.expected, vi)
 			require.True(t, ok)
 			ui, ok := iv.Uint64()
-			if expected < 0 {
+			if test.expected < 0 {
 				require.False(t, ok)
 			} else {
-				require.Equal(t, uint64(expected), ui)
+				require.Equal(t, uint64(test.expected), ui)
 				require.True(t, ok)
 			}
 			iint, ok := iv.Int()
-			require.Equal(t, int(expected), iint)
+			require.Equal(t, int(test.expected), iint)
 			require.True(t, ok)
-			require.Equal(t, expectedStrings[i], v.String())
+			require.Equal(t, test.str, v.String())
+
+			e, err := msgpack.Marshal(v)
+			require.NoError(t, err)
+			require.Equal(t, test.reencode, e)
 		}
 	})
 
@@ -243,7 +291,7 @@ func TestSignedIntegersDecode(t *testing.T) {
 	})
 }
 
-func TestFloatsDecode(t *testing.T) {
+func TestFloats(t *testing.T) {
 	t.Run("Floats32", func(t *testing.T) {
 		// Test some float32 values
 		in := bytes.NewBuffer([]byte{
@@ -258,12 +306,26 @@ func TestFloatsDecode(t *testing.T) {
 		require.Equal(t, float32(10.0), float32(fv))
 		require.Equal(t, "10.000000", v.String())
 
+		e, err := msgpack.Marshal(v)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xca, 0x41, 0x20, 0x00, 0x00}, e)
+		e, err = msgpack.Marshal(float32(fv))
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xca, 0x41, 0x20, 0x00, 0x00}, e)
+
 		v, err = msgpack.Decode(in)
 		require.NoError(t, err)
 		require.Equal(t, v.Kind(), msgpack.ValueKindFloat32)
 		fv = v.(msgpack.Float32)
 		require.Equal(t, float32(-10.0), float32(fv))
 		require.Equal(t, "-10.000000", v.String())
+
+		e, err = msgpack.Marshal(v)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xca, 0xc1, 0x20, 0x00, 0x00}, e)
+		e, err = msgpack.Marshal(float32(fv))
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xca, 0xc1, 0x20, 0x00, 0x00}, e)
 	})
 
 	t.Run("Floats64", func(t *testing.T) {
@@ -280,12 +342,26 @@ func TestFloatsDecode(t *testing.T) {
 		require.Equal(t, float64(10.0), float64(fv))
 		require.Equal(t, "F10.000000", v.String())
 
+		e, err := msgpack.Marshal(v)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xcb, 0x40, 0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, e)
+		e, err = msgpack.Marshal(float64(fv))
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xcb, 0x40, 0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, e)
+
 		v, err = msgpack.Decode(in)
 		require.NoError(t, err)
 		require.Equal(t, v.Kind(), msgpack.ValueKindFloat64)
 		fv = v.(msgpack.Float64)
 		require.Equal(t, float64(-10.0), float64(fv))
 		require.Equal(t, "F-10.000000", v.String())
+
+		e, err = msgpack.Marshal(v)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xcb, 0xc0, 0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, e)
+		e, err = msgpack.Marshal(float64(fv))
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xcb, 0xc0, 0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00}, e)
 	})
 
 	t.Run("IncompleteFloat32", func(t *testing.T) {
@@ -309,7 +385,7 @@ func TestFloatsDecode(t *testing.T) {
 	})
 }
 
-func TestStringsDecode(t *testing.T) {
+func TestStrings(t *testing.T) {
 	t.Run("FixStr", func(t *testing.T) {
 		// Test fixstr
 		in := bytes.NewBuffer([]byte{
@@ -322,6 +398,13 @@ func TestStringsDecode(t *testing.T) {
 
 		sv := v.(msgpack.String)
 		require.Equal(t, "Hello", string(sv))
+
+		e, err := msgpack.Marshal(v)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xa5, 'H', 'e', 'l', 'l', 'o'}, e)
+		e, err = msgpack.Marshal(string(sv))
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xa5, 'H', 'e', 'l', 'l', 'o'}, e)
 	})
 
 	t.Run("IncompleteFixStr", func(t *testing.T) {
@@ -335,18 +418,29 @@ func TestStringsDecode(t *testing.T) {
 	})
 
 	t.Run("Str8", func(t *testing.T) {
-		// Test str8
-		in := bytes.NewBuffer([]byte{
-			0xd9, 0x0b, // str8 with length 11
-			'H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd',
+		t.Run("Decode", func(t *testing.T) {
+			in := bytes.NewBuffer([]byte{
+				0xd9, 0x0b, // str8 with length 11
+				'H', 'e', 'l', 'l', 'o', ' ', 'W', 'o', 'r', 'l', 'd',
+			})
+
+			v, err := msgpack.Decode(in)
+			require.NoError(t, err)
+			require.Equal(t, v.Kind(), msgpack.ValueKindString)
+
+			sv := v.(msgpack.String)
+			require.Equal(t, "Hello World", string(sv))
 		})
-
-		v, err := msgpack.Decode(in)
-		require.NoError(t, err)
-		require.Equal(t, v.Kind(), msgpack.ValueKindString)
-
-		sv := v.(msgpack.String)
-		require.Equal(t, "Hello World", string(sv))
+		t.Run("Encode", func(t *testing.T) {
+			str := strings.Repeat("x", 200)
+			expected := append([]byte{0xd9, 0xc8}, []byte(str)...)
+			e, err := msgpack.Marshal(str)
+			require.NoError(t, err)
+			require.Equal(t, expected, e)
+			e, err = msgpack.Marshal(str)
+			require.NoError(t, err)
+			require.Equal(t, expected, e)
+		})
 	})
 
 	t.Run("IncompleteStr8", func(t *testing.T) {
@@ -361,18 +455,30 @@ func TestStringsDecode(t *testing.T) {
 	})
 
 	t.Run("Str16", func(t *testing.T) {
-		// Test str16
-		in := bytes.NewBuffer([]byte{
-			0xda, 0x00, 0x0e, // str16 with length 14
-			'H', 'e', 'l', 'l', 'o', ',', ' ', 'M', 's', 'g', 'p', 'a', 'c', 'k',
+		t.Run("Decode", func(t *testing.T) {
+			in := bytes.NewBuffer([]byte{
+				0xda, 0x00, 0x0e, // str16 with length 14
+				'H', 'e', 'l', 'l', 'o', ',', ' ', 'M', 's', 'g', 'p', 'a', 'c', 'k',
+			})
+
+			v, err := msgpack.Decode(in)
+			require.NoError(t, err)
+			require.Equal(t, v.Kind(), msgpack.ValueKindString)
+
+			sv := v.(msgpack.String)
+			require.Equal(t, "Hello, Msgpack", string(sv))
 		})
+		t.Run("Encode", func(t *testing.T) {
+			str := strings.Repeat("x", 400)
+			expected := append([]byte{0xda, 0x01, 0x90}, []byte(str)...)
 
-		v, err := msgpack.Decode(in)
-		require.NoError(t, err)
-		require.Equal(t, v.Kind(), msgpack.ValueKindString)
-
-		sv := v.(msgpack.String)
-		require.Equal(t, "Hello, Msgpack", string(sv))
+			e, err := msgpack.Marshal(str)
+			require.NoError(t, err)
+			require.Equal(t, expected, e)
+			e, err = msgpack.Marshal(str)
+			require.NoError(t, err)
+			require.Equal(t, expected, e)
+		})
 	})
 
 	t.Run("IncompleteStr16", func(t *testing.T) {
@@ -387,18 +493,30 @@ func TestStringsDecode(t *testing.T) {
 	})
 
 	t.Run("Str32", func(t *testing.T) {
-		// Test str32
-		in := bytes.NewBuffer([]byte{
-			0xdb, 0x00, 0x00, 0x00, 0x11, // str32 with length 17
-			'H', 'e', 'l', 'l', 'o', ' ', 'f', 'r', 'o', 'm', ' ', 'S', 't', 'r', '3', '2', '!',
+		t.Run("Decode", func(t *testing.T) {
+			in := bytes.NewBuffer([]byte{
+				0xdb, 0x00, 0x00, 0x00, 0x11, // str32 with length 17
+				'H', 'e', 'l', 'l', 'o', ' ', 'f', 'r', 'o', 'm', ' ', 'S', 't', 'r', '3', '2', '!',
+			})
+
+			v, err := msgpack.Decode(in)
+			require.NoError(t, err)
+			require.Equal(t, v.Kind(), msgpack.ValueKindString)
+
+			sv := v.(msgpack.String)
+			require.Equal(t, "Hello from Str32!", string(sv))
 		})
+		t.Run("Encode", func(t *testing.T) {
+			str := strings.Repeat("y", 70000)
+			expected := append([]byte{0xdb, 0x00, 0x01, 0x11, 0x70}, []byte(str)...)
 
-		v, err := msgpack.Decode(in)
-		require.NoError(t, err)
-		require.Equal(t, v.Kind(), msgpack.ValueKindString)
-
-		sv := v.(msgpack.String)
-		require.Equal(t, "Hello from Str32!", string(sv))
+			e, err := msgpack.Marshal(str)
+			require.NoError(t, err)
+			require.Equal(t, expected, e)
+			e, err = msgpack.Marshal(str)
+			require.NoError(t, err)
+			require.Equal(t, expected, e)
+		})
 	})
 
 	t.Run("IncompleteStr32", func(t *testing.T) {
@@ -838,6 +956,9 @@ func TestUnusedCode(t *testing.T) {
 }
 
 func TestMappingKeyHashing(t *testing.T) {
+	amap := msgpack.NewMap()
+	amap.Set(msgpack.NewInteger(1), msgpack.NewString("ciao"))
+
 	m := msgpack.NewMap()
 	m.Set(msgpack.NewNil(), msgpack.NewInteger(1))
 	m.Set(msgpack.NewBool(true), msgpack.NewInteger(2))
@@ -847,5 +968,24 @@ func TestMappingKeyHashing(t *testing.T) {
 	m.Set(msgpack.NewInteger(uint64(0xFFFF_FFFF_FFFF_FFFF)), msgpack.NewInteger(6))
 	m.Set(msgpack.NewFloat32(1), msgpack.NewInteger(7))
 	m.Set(msgpack.NewFloat64(1), msgpack.NewInteger(8))
-	fmt.Println(m)
+	m.Set(msgpack.NewString("true"), msgpack.NewInteger(9))
+	m.Set(msgpack.NewString("false"), msgpack.NewInteger(10))
+	m.Set(amap, msgpack.NewInteger(11))
+
+	require.Equal(t, 11, m.Len())
+	isTrue := func(v msgpack.Value, check bool) msgpack.Value {
+		require.True(t, check)
+		return v
+	}
+	require.Equal(t, msgpack.NewInteger(1), isTrue(m.Get(msgpack.NewNil())))
+	require.Equal(t, msgpack.NewInteger(2), isTrue(m.Get(msgpack.NewBool(true))))
+	require.Equal(t, msgpack.NewInteger(3), isTrue(m.Get(msgpack.NewBool(false))))
+	require.Equal(t, msgpack.NewInteger(4), isTrue(m.Get(msgpack.NewInteger(1))))
+	require.Equal(t, msgpack.NewInteger(5), isTrue(m.Get(msgpack.NewInteger(-1))))
+	require.Equal(t, msgpack.NewInteger(6), isTrue(m.Get(msgpack.NewInteger(uint64(0xFFFF_FFFF_FFFF_FFFF)))))
+	require.Equal(t, msgpack.NewInteger(7), isTrue(m.Get(msgpack.NewFloat32(1))))
+	require.Equal(t, msgpack.NewInteger(8), isTrue(m.Get(msgpack.NewFloat64(1))))
+	require.Equal(t, msgpack.NewInteger(9), isTrue(m.Get(msgpack.NewString("true"))))
+	require.Equal(t, msgpack.NewInteger(10), isTrue(m.Get(msgpack.NewString("false"))))
+	require.Equal(t, msgpack.NewInteger(11), isTrue(m.Get(amap)))
 }

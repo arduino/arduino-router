@@ -8,6 +8,7 @@ package msgpack
 import (
 	"encoding/hex"
 	"fmt"
+	"iter"
 	"math"
 	"strconv"
 	"strings"
@@ -308,6 +309,17 @@ func (m *Map) Set(key Value, value Value) {
 
 func (m Map) hash() mapHashableKey {
 	return "M:" + m.String()
+}
+
+// Iterate iterates over the key-value pairs in the map.
+func (m Map) Iterate() iter.Seq2[Value, Value] {
+	return func(yield func(Value, Value) bool) {
+		for _, k := range m.k {
+			if !yield(k, m.v[k.hash()]) {
+				return
+			}
+		}
+	}
 }
 
 // Extension represents an extension value.
