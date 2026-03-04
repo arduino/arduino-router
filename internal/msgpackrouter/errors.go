@@ -24,6 +24,7 @@ const (
 	ErrCodeFailedToSendRequests = 3
 	ErrCodeGenericError         = 4
 	ErrCodeRouteAlreadyExists   = 5
+	ErrCodeBufferLimitExceeded  = 6
 )
 
 type RouteError struct {

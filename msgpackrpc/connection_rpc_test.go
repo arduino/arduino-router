@@ -16,10 +16,12 @@
 package msgpackrpc
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/djherbis/buffer"
 	"github.com/djherbis/nio/v3"
@@ -39,11 +41,11 @@ func TestRPCConnection(t *testing.T) {
 	requestError := ""
 	conn := NewConnection(
 		in, out,
-		func(logger FunctionLogger, method string, params []any, res ResponseHandler) {
+		func(logger FunctionLogger, method string, params []any, res ResponseSender) {
 			go func() {
 				defer wg.Done()
 				request = fmt.Sprintf("REQ method=%v params=%v", method, params)
-				res([]any{}, nil)
+				_ = res([]any{}, nil)
 			}()
 		},
 		func(logger FunctionLogger, method string, params []any) {
@@ -121,4 +123,67 @@ func TestRPCConnection(t *testing.T) {
 		wg.Wait()
 		require.Equal(t, "error=invalid ID in request response '999': double answer or request not sent", requestError)
 	}
+}
+
+func TestRPCMessageMaxSize(t *testing.T) {
+	in, testdataIn := nio.Pipe(buffer.New(1024))
+	testdataOut, out := nio.Pipe(buffer.New(1024))
+
+	enc := msgpack.NewEncoder(testdataIn)
+	enc.UseCompactInts(true)
+	send := func(msg ...any) {
+		require.NoError(t, enc.Encode(msg))
+	}
+
+	d := msgpack.NewDecoder(testdataOut)
+	d.UseLooseInterfaceDecoding(true)
+
+	conn := NewConnection(
+		in, out,
+		func(logger FunctionLogger, method string, params []any, res ResponseSender) {
+			// Return a big response
+			require.Error(t, res("123456789012345678901234567890", nil))
+			require.NoError(t, res("123", nil))
+		},
+		func(logger FunctionLogger, method string, params []any) {
+			// Should receive only small notifications
+			require.Equal(t, "hi", params[0].(string))
+		},
+		func(e error) {
+			// ignore "can't read packet: io: read/write on closed pipe"
+			if errors.Is(e, io.ErrClosedPipe) {
+				return
+			}
+			if errors.Is(e, io.EOF) {
+				return
+			}
+			require.FailNow(t, "error handler should not be called")
+		},
+	)
+
+	// Set a very small max message size to trigger the error
+	conn.SetMaxOutgoingMessageSize(16)
+
+	// Start the connection loop
+	go conn.Run()
+	t.Cleanup(conn.Close)
+
+	// Call a method that returns a response exceeding the limit
+	send(messageTypeRequest, MessageID(1), "test", []any{})
+	var resp any
+	require.NoError(t, d.Decode(&resp))
+	require.Equal(t, []any{int64(1), int64(1), nil, "123"}, resp) // Check that the custom error is returned
+
+	// Call a method with parameters exceeding the limit
+	res, reqErr, err := conn.SendRequest(t.Context(), "test", "123456789") // This message should exceed the limit
+	require.Nil(t, res)
+	require.Nil(t, reqErr)
+	require.ErrorIs(t, err, &ErrBufferLimitExceeded{})
+
+	// Send a notification with parameters exceeding the limit
+	err = conn.SendNotification("test", "hi") // This message should pass
+	require.NoError(t, err)
+	err = conn.SendNotification("test", "123456789") // This message should exceed the limit
+	require.ErrorIs(t, err, &ErrBufferLimitExceeded{})
+	time.Sleep(500 * time.Millisecond)
 }

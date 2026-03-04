@@ -38,7 +38,8 @@ const (
 type Connection struct {
 	in                  io.ReadCloser
 	out                 io.WriteCloser
-	outEncoder          *msgpack.Encoder
+	msgpEncoder         *msgpack.Encoder
+	msgpBuffer          *LimitedBuffer
 	outMutex            sync.Mutex
 	errorHandler        ErrorHandler
 	requestHandler      RequestHandler
@@ -56,12 +57,18 @@ type outRequest struct {
 }
 
 // RequestHandler handles requests from a MessagePack-RPC Connection.
-type RequestHandler func(logger FunctionLogger, method string, params []any, res ResponseHandler)
+type RequestHandler func(logger FunctionLogger, method string, params []any, res ResponseSender)
 
-// ResponseHandler is a callback function used to send the result of a request back
-// to the caller. It must be thread-safe (request handlers may decide to handle the request
+// ResponseHandler is a callback function used to process the result of a request.
+// It must be thread-safe (request handlers may decide to handle the request
 // asynchronously, calling the response handler from another goroutine when the result is ready).
 type ResponseHandler func(result any, err any)
+
+// ResponseSender is a callback function used to send the result of a request back
+// to the caller. It must be thread-safe (request handlers may decide to handle the request
+// asynchronously, calling the response handler from another goroutine when the result is ready).
+// If the response could not be delivered, an error should be returned.
+type ResponseSender func(result any, err any) error
 
 // NotificationHandler handles notifications from a MessagePack-RPC Connection.
 type NotificationHandler func(logger FunctionLogger, method string, params []any)
@@ -73,11 +80,11 @@ type ErrorHandler func(error)
 
 // NewConnection creates a new MessagePack-RPC Connection handler.
 func NewConnection(in io.ReadCloser, out io.WriteCloser, requestHandler RequestHandler, notificationHandler NotificationHandler, errorHandler ErrorHandler) *Connection {
-	outEncoder := msgpack.NewEncoder(out)
-	outEncoder.UseCompactInts(true)
+	msgpEncoder := msgpack.NewEncoder(nil)
+	msgpEncoder.UseCompactInts(true)
 	if requestHandler == nil {
-		requestHandler = func(logger FunctionLogger, method string, params []any, res ResponseHandler) {
-			res(nil, fmt.Errorf("method not implemented: %s", method))
+		requestHandler = func(logger FunctionLogger, method string, params []any, res ResponseSender) {
+			_ = res(nil, fmt.Errorf("method not implemented: %s", method))
 		}
 	}
 	if notificationHandler == nil {
@@ -93,7 +100,8 @@ func NewConnection(in io.ReadCloser, out io.WriteCloser, requestHandler RequestH
 	return &Connection{
 		in:                  in,
 		out:                 out,
-		outEncoder:          outEncoder,
+		msgpEncoder:         msgpEncoder,
+		msgpBuffer:          nil, // no max buffer size by default, can be set with SetMaxBufferSize
 		requestHandler:      requestHandler,
 		notificationHandler: notificationHandler,
 		errorHandler:        errorHandler,
@@ -107,6 +115,21 @@ func NewConnection(in io.ReadCloser, out io.WriteCloser, requestHandler RequestH
 // it should be called before starting the connection with Run method.
 func (c *Connection) SetLogger(l Logger) {
 	c.logger = l
+}
+
+// SetMaxOutgoingMessageSize sets the maximum buffer size for outgoing messages (default is no limit).
+// A value <= 0 means no limit.
+func (c *Connection) SetMaxOutgoingMessageSize(size int) {
+	c.outMutex.Lock()
+	defer c.outMutex.Unlock()
+
+	if size <= 0 {
+		// No limits
+		c.msgpBuffer = nil
+	}
+
+	// Set the buffer and error to be used when a message exceeds the limit
+	c.msgpBuffer = NewLimitedBuffer(size)
 }
 
 func (c *Connection) Run() {
@@ -191,13 +214,9 @@ func (c *Connection) handleIncomingRequest(id MessageID, method string, params [
 
 	// This callback may be called by another goroutine, because the request handler
 	// may want to process the request asynchronously.
-	cb := func(reqResult, reqError any) {
+	cb := func(reqResult, reqError any) error {
 		c.logger.LogOutgoingResponse(id, method, reqResult, reqError)
-
-		if err := c.send(messageTypeResponse, id, reqError, reqResult); err != nil {
-			c.errorHandler(fmt.Errorf("error sending response: %w", err))
-			c.Close()
-		}
+		return c.send(messageTypeResponse, id, reqError, reqResult)
 	}
 
 	c.requestHandler(logger, method, params, cb)
@@ -298,15 +317,30 @@ func (c *Connection) SendNotification(method string, params ...any) error {
 }
 
 func (c *Connection) send(data ...any) error {
-	start := time.Now()
+	doSend := func() error {
+		c.outMutex.Lock()
+		defer c.outMutex.Unlock()
 
-	c.outMutex.Lock()
-	err := c.outEncoder.Encode(data)
-	c.outMutex.Unlock()
-	if err != nil {
+		if c.msgpBuffer == nil {
+			// Unlimited buffer size, write directly to the out stream without buffering
+			c.msgpEncoder.Reset(c.out)
+			return c.msgpEncoder.Encode(data)
+		}
+
+		// Limited buffer size, write to the buffer first and then flush it to the out stream
+		c.msgpBuffer.Reset()
+		c.msgpEncoder.Reset(c.msgpBuffer)
+		if err := c.msgpEncoder.Encode(data); err != nil {
+			return err
+		}
+		_, err := c.out.Write(c.msgpBuffer.Bytes())
 		return err
 	}
 
+	start := time.Now()
+	if err := doSend(); err != nil {
+		return err
+	}
 	elapsed := time.Since(start)
 
 	c.logger.LogOutgoingDataDelay(elapsed)

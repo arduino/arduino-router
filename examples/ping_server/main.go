@@ -35,13 +35,13 @@ func main() {
 	defer s.Close()
 
 	conn := msgpackrpc.NewConnection(s, s,
-		func(_ msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseHandler) {
+		func(_ msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseSender) {
 			slog.Info("Received request", "method", method, "params", params)
 			if method == "ping" {
-				res(params, nil)
+				_ = res(params, nil)
 				return
 			}
-			res(nil, "method not found: "+method)
+			_ = res(nil, "method not found: "+method)
 		},
 		nil,
 		nil,
