@@ -1,0 +1,17 @@
+version = 1
+
+# Tool-generated files.
+[[annotations]]
+path = [
+  ".dockerignore",
+  ".editorconfig",
+  ".golangci.yml",
+  ".gitignore",
+  ".licensed.yml",
+  ".licenses/**",
+  "dprint.json",
+  "go.mod",
+  "go.sum",
+]
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "CC0-1.0"
