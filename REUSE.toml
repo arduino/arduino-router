@@ -1,12 +1,13 @@
 version = 1
 
-# Tool-generated files.
+# Tool-generated or configuration files.
 [[annotations]]
 path = [
   ".dockerignore",
   ".editorconfig",
   ".golangci.yml",
   ".gitignore",
+  ".github/**",
   ".licensed.yml",
   ".licenses/**",
   "dprint.json",
