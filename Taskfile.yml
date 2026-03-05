@@ -18,6 +18,7 @@ tasks:
       - install:linter
       - install:goimports
       - install:dprint
+      - install:reuse
 
   install:linter:
     cmds:
@@ -31,6 +32,10 @@ tasks:
     cmds:
       - curl -fsSL https://dprint.dev/install.sh | sh -s {{ .DPRINT_VERSION }}
       - mkdir -p .bin && cp $HOME/.dprint/bin/dprint .bin/dprint # workaround for local install
+
+  install:reuse:
+    cmds:
+      - pipx install reuse
 
   test:
     desc: Run all go tests
@@ -47,7 +52,8 @@ tasks:
   lint:
     desc: Run the linters
     cmds:
-      - ${PWD}/.bin/golangci-lint run --fix -v --timeout 300s {{ .CLI_ARGS }}
+      - ${PWD}/.bin/golangci-lint run --fix --timeout 300s {{ .CLI_ARGS }}
+      - reuse lint
 
   fmt:
     desc: Run format
@@ -94,11 +100,6 @@ tasks:
       - adb push ./build/arduino-router_*_arm64.deb /tmp/
       - ./scripts/run-remote-sudo.sh "dpkg -i /tmp/arduino-router_*_arm64.deb && needrestart -r a"
 
-  license:update:
-    desc: Update license headers in Go files
-    cmds:
-      - addlicense -c "Arduino s.r.l. and/or its affiliated companies" -f ./license_header.tpl $(find . -name "*.go" -type f -print0 | xargs -0)
-
   update-deb-copyright:
     desc: Extract project and dependency licenses into asd copyright
     cmds:
@@ -119,6 +120,7 @@ tasks:
     desc: Cache dependency license metadata
     deps:
       - task: general:prepare-deps
+      - task: update-deb-copyright
     cmds:
       - |
           if
