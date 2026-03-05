@@ -5,7 +5,7 @@ type: go
 summary: Paths is a library that provides a set of utilities to work with file paths
   in a platform-independent way.
 homepage: https://pkg.go.dev/github.com/arduino/go-paths-helper
-license: gpl-3.0
+license: gpl-3.0-or-later
 licenses:
 - sources: LICENSE
   text: |2
