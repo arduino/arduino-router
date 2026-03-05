@@ -10,9 +10,11 @@ path = [
   ".github/**",
   ".licensed.yml",
   ".licenses/**",
+  "debian/arduino-router/**",
   "dprint.json",
   "go.mod",
   "go.sum",
+  "**/testdata/**",
 ]
 SPDX-FileCopyrightText = "NONE"
 SPDX-License-Identifier = "CC0-1.0"
