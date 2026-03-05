@@ -1,5 +1,10 @@
 #!/bin/bash
 
+# This file is part of arduino-router.
+#
+# SPDX-FileCopyrightText: Arduino s.r.l. and/or its affiliated companies
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 # Runs a command as sudo on the board (adb shell), while prompting for the password interactively.
 # To be used in the taskfile.
 
