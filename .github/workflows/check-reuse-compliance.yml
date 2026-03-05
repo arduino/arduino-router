@@ -8,7 +8,8 @@ on:
   repository_dispatch:
 
 jobs:
-  check-cache:
+  run-reuse-linter:
+    name: Run REUSE linter
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -24,10 +25,16 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install tools
+        run: |
+          go tool \
+            github.com/go-task/task/v3/cmd/task \
+              --silent \
+              init
+
       - name: Check REUSE compliance
         run: |
           go tool \
             github.com/go-task/task/v3/cmd/task \
               --silent \
-              init \
-              lint
+              lint >> $GITHUB_STEP_SUMMARY
