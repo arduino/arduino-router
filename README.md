@@ -73,3 +73,10 @@ After setting the maximum size:
 - If a CALL message exceeds the maximum size: an error response is returned immediately, and the call is not forwarded.
 - If a NOTIFICATION message exceeds the maximum size: the notification is ignored and not forwarded.
 - If a RESPONSE message exceeds the maximum size: the response is ignored and an error message is returned to the caller instead of the response.
+
+## License
+
+```
+SPDX-FileCopyrightText: Arduino s.r.l. and/or its affiliated companies
+SPDX-License-Identifier: GPL-3.0-or-later
+```

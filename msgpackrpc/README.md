@@ -20,3 +20,10 @@ The protocol supported is defined here https://github.com/msgpack-rpc/msgpack-rp
   1. `type`: Fixed number `2` (to identify this message as a NOTIFICATION).
   2. `methods`: The method name.
   3. `params`: An array of the function parameters.
+
+## License
+
+```
+SPDX-FileCopyrightText: Arduino s.r.l. and/or its affiliated companies
+SPDX-License-Identifier: GPL-3.0-or-later
+```
