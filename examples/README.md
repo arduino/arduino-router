@@ -1,3 +1,5 @@
+# Examples of the golang `msgpackrpc` library
+
 The examples here shows how an RPC communication should work.
 
 - `ping_server` is a MsgPack RPC server that answers to the `ping` method. It connects to the MsgPack RPC Router and registers the `"ping"` method, so other client can use it.
@@ -46,3 +48,10 @@ Let's see now how `msgpackdump` can be used:
    2025/04/30 16:29:11 EOF
    exit status 1
    ```
+
+## License
+
+```
+SPDX-FileCopyrightText: Arduino s.r.l. and/or its affiliated companies
+SPDX-License-Identifier: GPL-3.0-or-later
+```
