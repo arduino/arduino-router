@@ -1,5 +1,11 @@
 version = 1
 
+# Debian build scripts
+[[annotations]]
+path = "debian/arduino-router/**"
+SPDX-FileCopyrightText = "Arduino s.r.l. and/or its affiliated companies"
+SPDX-License-Identifier = "GPL-3.0-or-later"
+
 # Tool-generated or configuration files.
 [[annotations]]
 path = [
@@ -10,7 +16,6 @@ path = [
   ".github/**",
   ".licensed.yml",
   ".licenses/**",
-  "debian/arduino-router/**",
   "dprint.json",
   "go.mod",
   "go.sum",
