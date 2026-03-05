@@ -13,6 +13,7 @@ tasks:
       - install:linter
       - install:goimports
       - install:dprint
+      - install:reuse
 
   install:linter:
     cmds:
@@ -27,6 +28,10 @@ tasks:
       - curl -fsSL https://dprint.dev/install.sh | sh -s {{ .DPRINT_VERSION }}
       - mkdir -p .bin && cp $HOME/.dprint/bin/dprint .bin/dprint # workaround for local install
 
+  install:reuse:
+    cmds:
+      - pipx install reuse
+
   test:
     desc: Run all go tests
     cmds:
@@ -40,9 +45,21 @@ tasks:
       - go tool cover -html=coverage.out
 
   lint:
-    desc: Run the linters
+    desc: Run all the linters
     cmds:
-      - ${PWD}/.bin/golangci-lint run --fix -v --timeout 300s {{ .CLI_ARGS }}
+      - task: lint:reuse
+      - task: lint:go {{ .CLI_ARGS }}
+      - task: lint:fmt
+
+  lint:reuse:
+    desc: Run reuse linter
+    cmds:
+      - reuse lint
+
+  lint:go:
+    desc: Run golangci-lint
+    cmds:
+      - ${PWD}/.bin/golangci-lint run --fix --timeout 300s {{ .CLI_ARGS }}
 
   fmt:
     desc: Run format
@@ -50,7 +67,7 @@ tasks:
       - goimports -l -w .
       - ${PWD}/.bin/dprint fmt
 
-  fmt-check:
+  lint:fmt:
     desc: Check format
     cmds:
       - ${PWD}/.bin/dprint check
