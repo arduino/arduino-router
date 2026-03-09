@@ -49,7 +49,7 @@ type Config struct {
 	LogLevel          slog.Level
 	ListenTCPAddr     string
 	ListenUnixAddr    string
-	AfterReadyCommand string
+	AfterReadyCommand []string
 	SerialPortAddr    string
 	SerialBaudRate    int
 	MonitorPortAddr   string
@@ -79,7 +79,7 @@ func main() {
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
 	cmd.Flags().StringVarP(&cfg.ListenTCPAddr, "listen-port", "l", "", "Listening port for RPC services")
 	cmd.Flags().StringVarP(&cfg.ListenUnixAddr, "unix-port", "u", "/var/run/arduino-router.sock", "Listening port for RPC services")
-	cmd.Flags().StringVar(&cfg.AfterReadyCommand, "after-ready", "", "Execute a command after the router is ready)")
+	cmd.Flags().StringSliceVar(&cfg.AfterReadyCommand, "after-ready", []string{}, "Execute a command after the router is ready)")
 	cmd.Flags().StringVarP(&cfg.SerialPortAddr, "serial-port", "p", "", "Serial port address")
 	cmd.Flags().IntVarP(&cfg.SerialBaudRate, "serial-baudrate", "b", 115200, "Serial port baud rate")
 	cmd.Flags().StringVarP(&cfg.MonitorPortAddr, "monitor-port", "m", "127.0.0.1:7500", "Listening port for MCU monitor proxy")
@@ -288,21 +288,23 @@ func startRouter(cfg Config) error {
 		}()
 	}
 
-	if cfg.AfterReadyCommand != "" {
+	if len(cfg.AfterReadyCommand) > 0 {
 		go func() {
-			// #nosec G204
-			p, err := paths.NewProcess(nil, "sh", "-c", cfg.AfterReadyCommand)
-			if err != nil {
-				slog.Error("Failed to create process for after-ready command", "command", cfg.AfterReadyCommand, "err", err)
-				return
+			for _, cmd := range cfg.AfterReadyCommand {
+				// #nosec G204
+				p, err := paths.NewProcess(nil, "sh", "-c", cmd)
+				if err != nil {
+					slog.Error("Failed to create process for after-ready command", "command", cfg.AfterReadyCommand, "err", err)
+					return
+				}
+				p.RedirectStderrTo(io.Discard)
+				p.RedirectStdoutTo(io.Discard)
+				if err := p.Run(); err != nil {
+					slog.Warn("Failed to start after-ready command", "command", cfg.AfterReadyCommand, "err", err)
+					return
+				}
+				slog.Info("Executed after-ready command successfully", "command", cfg.AfterReadyCommand)
 			}
-			p.RedirectStderrTo(io.Discard)
-			p.RedirectStdoutTo(io.Discard)
-			if err := p.Run(); err != nil {
-				slog.Error("Failed to start after-ready command", "command", cfg.AfterReadyCommand, "err", err)
-				return
-			}
-			slog.Info("Executed after-ready command successfully", "command", cfg.AfterReadyCommand)
 		}()
 	}
 
