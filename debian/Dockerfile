@@ -24,6 +24,12 @@ RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
   export LDFLAGS=$([ -n "$RELEASE" ] && echo "-s -w" || echo "") \
   && GOOS=linux GOARCH=${ARCH} go build -ldflags "${LDFLAGS} -X 'main.Version=${VERSION}'" -o ${BINARY_NAME} .
 
+RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
+  --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
+  export VERSION=$(echo "${VERSION}" | sed -e "s/^v\(.*\)/\1/") \
+  export LDFLAGS=$([ -n "$RELEASE" ] && echo "-s -w" || echo "") \
+  && GOOS=linux GOARCH=${ARCH} go build -ldflags "${LDFLAGS} -X 'main.Version=${VERSION}'" -o ${BINARY_NAME}-cli ./cmd/arduino-router-cli
+
 FROM debian:bookworm AS debian
 
 ARG VERSION
@@ -40,6 +46,7 @@ RUN apt-get update && apt-get install -y sed
 
 COPY ./debian/${DEB_NAME} /${DEB_NAME}/
 COPY --from=go /app/${BINARY_NAME} /${DEB_NAME}/usr/bin/${BINARY_NAME}
+COPY --from=go /app/${BINARY_NAME}-cli /${DEB_NAME}/usr/bin/${BINARY_NAME}-cli
 
 # Go application are tagged with `v` prefix, this remove the first v if present
 RUN export VERSION=$(echo "${VERSION}" | sed -e "s/^v\(.*\)/\1/") && \
