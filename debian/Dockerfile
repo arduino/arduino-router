@@ -28,7 +28,7 @@ RUN --mount=type=cache,target=/go/pkg/mod,sharing=locked \
   --mount=type=cache,target=/root/.cache/go-build,sharing=locked \
   export VERSION=$(echo "${VERSION}" | sed -e "s/^v\(.*\)/\1/") \
   export LDFLAGS=$([ -n "$RELEASE" ] && echo "-s -w" || echo "") \
-  && GOOS=linux GOARCH=${ARCH} go build -ldflags "${LDFLAGS} -X 'main.Version=${VERSION}'" -o ${BINARY_NAME}-cli ./cmd/arduino-router-client
+  && GOOS=linux GOARCH=${ARCH} go build -ldflags "${LDFLAGS} -X 'main.Version=${VERSION}'" -o ${BINARY_NAME}-cli ./cmd/arduino-router-cli
 
 FROM debian:bookworm AS debian
 
