@@ -1,0 +1,10 @@
+version = 1
+
+# Test data
+[[annotations]]
+path = [
+  "testdata/array",
+  "testdata/map",
+]
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "CC0-1.0"
