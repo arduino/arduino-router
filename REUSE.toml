@@ -13,7 +13,6 @@ path = [
   ".editorconfig",
   ".golangci.yml",
   ".gitignore",
-  ".github/**",
   ".licensed.yml",
   ".licenses/**",
   "dprint.json",
