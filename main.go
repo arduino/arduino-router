@@ -266,6 +266,7 @@ func startRouter(cfg Config) error {
 				}
 
 				// in any case, wait for the router to drop the connection
+				wr.Close()
 				serialPort.Close()
 				<-routerExit
 			}
