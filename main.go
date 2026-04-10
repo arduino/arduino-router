@@ -17,6 +17,7 @@ package main
 
 import (
 	"cmp"
+	"context"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -29,16 +30,18 @@ import (
 	"time"
 
 	"github.com/arduino/go-paths-helper"
+	discovery "github.com/arduino/pluggable-discovery-protocol-handler/v2"
+	ssync "github.com/arduino/serial-discovery/sync"
+	"github.com/spf13/cobra"
+	"go.bug.st/cleanup"
+	"go.bug.st/f"
+	"go.bug.st/serial"
 
 	"github.com/arduino/arduino-router/internal/hciapi"
 	"github.com/arduino/arduino-router/internal/monitorapi"
 	"github.com/arduino/arduino-router/internal/msgpackrouter"
 	networkapi "github.com/arduino/arduino-router/internal/network-api"
 	"github.com/arduino/arduino-router/msgpackrpc"
-
-	"github.com/spf13/cobra"
-	"go.bug.st/f"
-	"go.bug.st/serial"
 )
 
 // Version will be set a build time with -ldflags
@@ -70,7 +73,7 @@ func main() {
 			if !cmd.Flags().Changed("unix-port") {
 				cfg.ListenUnixAddr = cmp.Or(os.Getenv("ARDUINO_ROUTER_SOCKET"), cfg.ListenUnixAddr)
 			}
-			if err := startRouter(cfg); err != nil {
+			if err := startRouter(cmd.Context(), cfg); err != nil {
 				slog.Error("Failed to start router", "err", err)
 				os.Exit(1)
 			}
@@ -91,7 +94,8 @@ func main() {
 		},
 	})
 
-	if err := cmd.Execute(); err != nil {
+	ctx, _ := cleanup.InterruptableContext(context.Background())
+	if err := cmd.ExecuteContext(ctx); err != nil {
 		slog.Error("Error executing command.", "error", err)
 	}
 }
@@ -125,7 +129,7 @@ func (d *MsgpackDebugStream) Close() error {
 	return d.Upstream.Close()
 }
 
-func startRouter(cfg Config) error {
+func startRouter(ctx context.Context, cfg Config) error {
 	slog.SetLogLoggerLevel(cfg.LogLevel)
 
 	var listeners []net.Listener
@@ -242,7 +246,7 @@ func startRouter(cfg Config) error {
 				close := serialCloseSignal
 				serialOpened.L.Unlock()
 
-				slog.Info("Opening serial connection", "serial", cfg.SerialPortAddr)
+				slog.Debug("Opening serial connection", "serial", cfg.SerialPortAddr)
 				serialPort, err := serial.Open(cfg.SerialPortAddr, &serial.Mode{
 					BaudRate: cfg.SerialBaudRate,
 					DataBits: 8,
@@ -250,8 +254,11 @@ func startRouter(cfg Config) error {
 					Parity:   serial.NoParity,
 				})
 				if err != nil {
-					slog.Error("Failed to open serial port. Retrying in 5 seconds...", "serial", cfg.SerialPortAddr, "err", err)
-					time.Sleep(5 * time.Second)
+					slog.Debug("Failed to open serial port. Wait for it...", "serial", cfg.SerialPortAddr, "err", err)
+					if err := waitForPort(ctx, cfg.SerialPortAddr); err != nil {
+						slog.Error("Failed to wait for serial port", "serial", cfg.SerialPortAddr, "err", err)
+						time.Sleep(5 * time.Second) // avoid busy loop in case of repeated failures
+					}
 					continue
 				}
 				slog.Info("Opened serial connection", "serial", cfg.SerialPortAddr)
@@ -261,7 +268,7 @@ func startRouter(cfg Config) error {
 				routerExit := router.Accept(wr)
 				select {
 				case <-routerExit:
-					slog.Info("Serial port failed connection")
+					slog.Debug("Serial port failed connection")
 				case <-close:
 				}
 
@@ -321,4 +328,27 @@ func startRouter(cfg Config) error {
 	}
 
 	return nil
+}
+
+func waitForPort(ctx context.Context, waitPort string) error {
+	wait := make(chan struct{})
+	kill, err := ssync.Start(func(event string, port *discovery.Port) {
+		if event == "add" && port.Address == waitPort {
+			slog.Debug("Serial port detected", "serial", port.Address)
+			wait <- struct{}{}
+		}
+	}, func(msg string) {
+		slog.Debug("Wait for serial error", "error", msg)
+	})
+	if err != nil {
+		return err
+	}
+	defer func() { kill <- true }()
+
+	select {
+	case <-wait:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
