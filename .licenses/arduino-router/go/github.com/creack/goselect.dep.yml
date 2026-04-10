@@ -1,6 +1,6 @@
 ---
 name: github.com/creack/goselect
-version: v0.1.2
+version: v0.1.3
 type: go
 summary:
 homepage: https://pkg.go.dev/github.com/creack/goselect
