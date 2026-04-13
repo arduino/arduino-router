@@ -93,8 +93,6 @@ tasks:
     desc: Extract project and dependency licenses into asd copyright
     cmds:
       - |
-          licensed notices
-
           cat > debian/arduino-router/usr/share/doc/arduino-router/copyright <<EOF
           Copyright 2025 ARDUINO SA (http://www.arduino.cc/)
 
@@ -135,6 +133,7 @@ tasks:
             exit 1
           fi
       - licensed cache
+      - licensed notices
 
   # Source: https://github.com/arduino/tooling-project-assets/blob/main/workflow-templates/assets/check-dependencies-task/Taskfile.yml
   general:check-dep-licenses:
