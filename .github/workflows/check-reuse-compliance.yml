@@ -20,21 +20,5 @@ jobs:
         with:
           submodules: recursive
 
-      - name: Install Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-
-      - name: Install tools
-        run: |
-          go tool \
-            github.com/go-task/task/v3/cmd/task \
-              --silent \
-              init
-
-      - name: Check REUSE compliance
-        run: |
-          go tool \
-            github.com/go-task/task/v3/cmd/task \
-              --silent \
-              lint:reuse >> $GITHUB_STEP_SUMMARY
+      - name: REUSE Compliance Check
+        uses: fsfe/reuse-action@v6
