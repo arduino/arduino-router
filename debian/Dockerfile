@@ -1,3 +1,8 @@
+# This file is part of arduino-router.
+#
+# SPDX-FileCopyrightText: Arduino s.r.l. and/or its affiliated companies
+# SPDX-License-Identifier: GPL-3.0-or-later
+
 FROM golang:1.25.2 AS go
 
 ARG BINARY_NAME
