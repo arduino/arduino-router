@@ -35,7 +35,7 @@ tasks:
 
   install:reuse:
     cmds:
-      - pipx install reuse
+      - uv tool install reuse
 
   test:
     desc: Run all go tests
@@ -59,7 +59,7 @@ tasks:
   lint:reuse:
     desc: Run reuse linter
     cmds:
-      - reuse lint
+      - uvx reuse lint
 
   lint:go:
     desc: Run golangci-lint
