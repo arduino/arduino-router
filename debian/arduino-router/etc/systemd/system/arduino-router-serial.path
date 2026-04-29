@@ -1,0 +1,8 @@
+[Unit]
+Description=Watch for /dev/ttyGS0 to start arduino-router-serial
+
+[Path]
+PathExists=/dev/ttyGS0
+
+[Install]
+WantedBy=multi-user.target

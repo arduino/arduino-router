@@ -1,5 +1,6 @@
 #!/bin/sh
 
-systemctl enable arduino-router
-systemctl enable arduino-router-serial
+systemctl enable arduino-router.service
+systemctl enable arduino-router-serial.service
+systemctl enable arduino-router-serial.path
 
