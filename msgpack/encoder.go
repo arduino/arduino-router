@@ -142,10 +142,26 @@ func Encode(val any, out io.Writer) error {
 			return writeUint64(v.u64)
 		}
 		return writeInt64(v.i64)
-	case uint, uint64:
-		return writeUint64(v.(uint64))
-	case int, int8, int16, int32, int64, uint8, uint16, uint32:
-		return writeInt64(v.(int64))
+	case uint:
+		return writeUint64(uint64(v))
+	case uint64:
+		return writeUint64(v)
+	case int:
+		return writeInt64(int64(v))
+	case int8:
+		return writeInt64(int64(v))
+	case int16:
+		return writeInt64(int64(v))
+	case int32:
+		return writeInt64(int64(v))
+	case int64:
+		return writeInt64(v)
+	case uint8:
+		return writeInt64(int64(v))
+	case uint16:
+		return writeInt64(int64(v))
+	case uint32:
+		return writeInt64(int64(v))
 	case Float32:
 		return write(binary.BigEndian.AppendUint32([]byte{0xca}, math.Float32bits(float32(v)))) // CA float 32
 	case float32:

@@ -7,6 +7,7 @@ package msgpack_test
 
 import (
 	"bytes"
+	"errors"
 	"strings"
 	"testing"
 
@@ -14,6 +15,11 @@ import (
 
 	"github.com/stretchr/testify/require"
 )
+
+// failWriter is an io.Writer that always returns an error.
+type failWriter struct{}
+
+func (failWriter) Write(p []byte) (int, error) { return 0, errors.New("write error") }
 
 func TestBooleanConstants(t *testing.T) {
 	require.Equal(t, msgpack.NewBool(true), msgpack.True)
@@ -1052,4 +1058,348 @@ func TestMappingIterator(t *testing.T) {
 		msgpack.NewNil(),
 		msgpack.NewString("replaced"),
 	}, values)
+}
+
+func TestEncodeNativeIntegerTypes(t *testing.T) {
+	tests := []struct {
+		val      any
+		expected []byte
+	}{
+		// Negative fixint range (-32..-1)
+		{int(-1), []byte{0xff}},
+		{int8(-1), []byte{0xff}},
+		// D0 int8 range (-128..-33)
+		{int8(-100), []byte{0xd0, 0x9c}},
+		{int(-100), []byte{0xd0, 0x9c}},
+		// D1 int16 via signed negative
+		{int16(-200), []byte{0xd1, 0xff, 0x38}},
+		// D1 int16 via uint8 overflow (200 > MaxInt8)
+		{uint8(200), []byte{0xd1, 0x00, 0xc8}},
+		// D2 int32
+		{int32(100000), []byte{0xd2, 0x00, 0x01, 0x86, 0xa0}},
+		{int16(1000), []byte{0xd1, 0x03, 0xe8}},
+		{uint16(40000), []byte{0xd2, 0x00, 0x00, 0x9c, 0x40}},
+		{uint32(100000), []byte{0xd2, 0x00, 0x01, 0x86, 0xa0}},
+		// Positive fixint
+		{int64(42), []byte{0x2a}},
+		{uint(42), []byte{0x2a}},
+		{uint64(42), []byte{0x2a}},
+	}
+	for _, tt := range tests {
+		e, err := msgpack.Marshal(tt.val)
+		require.NoError(t, err, "for value %v (%T)", tt.val, tt.val)
+		require.Equal(t, tt.expected, e, "for value %v (%T)", tt.val, tt.val)
+	}
+}
+
+func TestEncodeBinary(t *testing.T) {
+	t.Run("BinaryType", func(t *testing.T) {
+		b := msgpack.NewBinary([]byte{0x01, 0x02, 0x03})
+		e, err := msgpack.Marshal(b)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xc4, 0x03, 0x01, 0x02, 0x03}, e)
+	})
+
+	t.Run("ByteSliceType", func(t *testing.T) {
+		b := []byte{0x0a, 0x0b, 0x0c}
+		e, err := msgpack.Marshal(b)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xc4, 0x03, 0x0a, 0x0b, 0x0c}, e)
+	})
+
+	t.Run("Bin16", func(t *testing.T) {
+		// 300 bytes triggers bin16 header (> 255)
+		data := make([]byte, 300)
+		for i := range data {
+			data[i] = byte(i)
+		}
+		e, err := msgpack.Marshal(msgpack.Binary(data))
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xc5, 0x01, 0x2c}, e[:3]) // 0x012c = 300
+		require.Equal(t, data, e[3:])
+	})
+
+	t.Run("Bin32", func(t *testing.T) {
+		// 70000 bytes triggers bin32 header (> 65535)
+		data := make([]byte, 70000)
+		for i := range data {
+			data[i] = byte(i)
+		}
+		e, err := msgpack.Marshal(msgpack.Binary(data))
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xc6, 0x00, 0x01, 0x11, 0x70}, e[:5]) // 0x00011170 = 70000
+		require.Equal(t, data, e[5:])
+	})
+}
+
+func TestEncodeArrayTypes(t *testing.T) {
+	t.Run("ArrayType", func(t *testing.T) {
+		a := msgpack.Array{msgpack.NewInteger(1), msgpack.NewString("foo")}
+		e, err := msgpack.Marshal(a)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0x92, 0x01, 0xa3, 'f', 'o', 'o'}, e)
+	})
+
+	t.Run("AnySlice", func(t *testing.T) {
+		a := []any{msgpack.NewInteger(1), msgpack.NewString("foo")}
+		e, err := msgpack.Marshal(a)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0x92, 0x01, 0xa3, 'f', 'o', 'o'}, e)
+	})
+
+	t.Run("Array16", func(t *testing.T) {
+		// 20 elements → array16 header (> 15)
+		a := make(msgpack.Array, 20)
+		for i := range a {
+			a[i] = msgpack.NewInteger(i)
+		}
+		e, err := msgpack.Marshal(a)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xdc, 0x00, 0x14}, e[:3]) // 0x14 = 20
+		require.Len(t, e, 3+20)                           // 20 fixints, each 1 byte
+	})
+
+	t.Run("Array32", func(t *testing.T) {
+		// 0x12345 elements → array32 header (> 65535 == 0xffff)
+		a := msgpack.NewArray()
+		for range 0x12345 {
+			a = append(a, msgpack.NewInteger(5))
+		}
+		e, err := msgpack.Marshal(a)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xdd, 0x00, 0x01, 0x23, 0x45}, e[:5])
+		require.Len(t, e, 5+0x12345)
+	})
+}
+
+func TestEncodeMapTypes(t *testing.T) {
+	t.Run("MapType", func(t *testing.T) {
+		m := msgpack.NewMap()
+		m.Set(msgpack.NewString("key"), msgpack.NewInteger(42))
+		e, err := msgpack.Marshal(m)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0x81, 0xa3, 'k', 'e', 'y', 0x2a}, e)
+	})
+
+	t.Run("AnyMap", func(t *testing.T) {
+		// Single entry to avoid non-deterministic ordering issues
+		m := map[any]any{msgpack.NewString("key"): msgpack.NewInteger(42)}
+		e, err := msgpack.Marshal(m)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0x81, 0xa3, 'k', 'e', 'y', 0x2a}, e)
+	})
+
+	t.Run("Map16", func(t *testing.T) {
+		// 20 entries → map16 header (> 15)
+		m := msgpack.NewMap()
+		for i := range 20 {
+			m.Set(msgpack.NewInteger(i), msgpack.NewInteger(i*10))
+		}
+		e, err := msgpack.Marshal(m)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xde, 0x00, 0x14}, e[:3]) // 0x14 = 20
+	})
+
+	t.Run("Map32", func(t *testing.T) {
+		// 70000 entries → map32 header (> 65535 == 0xffff)
+		m := msgpack.NewMap()
+		for i := range 70000 {
+			m.Set(msgpack.NewInteger(i), msgpack.NewInteger(i*10))
+		}
+		e, err := msgpack.Marshal(m)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0xdf, 0x00, 0x01, 0x11, 0x70}, e[:5]) // 0x00011170 = 70000
+	})
+}
+
+func TestEncodeReflectTypes(t *testing.T) {
+	t.Run("TypedMap", func(t *testing.T) {
+		m := map[string]int{"a": 1}
+		e, err := msgpack.Marshal(m)
+		require.NoError(t, err)
+		// fixmap(1) + fixstr("a") + fixint(1)
+		require.Equal(t, []byte{0x81, 0xa1, 'a', 0x01}, e)
+	})
+
+	t.Run("TypedSlice", func(t *testing.T) {
+		s := []int{1, 2, 3}
+		e, err := msgpack.Marshal(s)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0x93, 0x01, 0x02, 0x03}, e)
+	})
+
+	t.Run("TypedArray", func(t *testing.T) {
+		a := [3]int{1, 2, 3}
+		e, err := msgpack.Marshal(a)
+		require.NoError(t, err)
+		require.Equal(t, []byte{0x93, 0x01, 0x02, 0x03}, e)
+	})
+}
+
+func TestEncodeUnsupportedType(t *testing.T) {
+	_, err := msgpack.Marshal(struct{}{})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unsupported type")
+
+	// Also exercises the Marshal error-return path
+	_, err = msgpack.Marshal(struct{ x int }{1})
+	require.Error(t, err)
+}
+
+func TestEncodeWriteErrors(t *testing.T) {
+	fw := failWriter{}
+	require.Error(t, msgpack.Encode(msgpack.NewNil(), fw))
+	require.Error(t, msgpack.Encode(msgpack.True, fw))
+	require.Error(t, msgpack.Encode(msgpack.NewInteger(1), fw))
+	require.Error(t, msgpack.Encode(msgpack.NewFloat32(1.0), fw))
+	require.Error(t, msgpack.Encode(msgpack.NewFloat64(1.0), fw))
+	require.Error(t, msgpack.Encode(msgpack.NewString("hello"), fw))
+	require.Error(t, msgpack.Encode(msgpack.Binary{0x01}, fw))
+	require.Error(t, msgpack.Encode([]byte{0x01}, fw))
+	require.Error(t, msgpack.Encode(msgpack.Array{msgpack.NewNil()}, fw))
+	require.Error(t, msgpack.Encode([]any{1}, fw))
+	m := msgpack.NewMap()
+	m.Set(msgpack.NewString("k"), msgpack.NewNil())
+	require.Error(t, msgpack.Encode(m, fw))
+	require.Error(t, msgpack.Encode(map[any]any{"k": 1}, fw))
+	require.Error(t, msgpack.Encode([]int{1}, fw))
+	require.Error(t, msgpack.Encode(map[string]int{"k": 1}, fw))
+}
+
+func TestDecodeExtensionTypes(t *testing.T) {
+	t.Run("Ext8", func(t *testing.T) {
+		in := bytes.NewBuffer([]byte{0xc7, 0x03, 0x09, 0x01, 0x02, 0x03})
+		v, err := msgpack.Decode(in)
+		require.NoError(t, err)
+		require.Equal(t, msgpack.ValueKindExtension, v.Kind())
+		ev := v.(msgpack.Extension)
+		require.Equal(t, int8(9), ev.Type)
+		require.Equal(t, []byte{0x01, 0x02, 0x03}, ev.Data)
+	})
+
+	t.Run("Ext16", func(t *testing.T) {
+		in := bytes.NewBuffer([]byte{0xc8, 0x00, 0x03, 0x0a, 0x01, 0x02, 0x03})
+		v, err := msgpack.Decode(in)
+		require.NoError(t, err)
+		ev := v.(msgpack.Extension)
+		require.Equal(t, int8(10), ev.Type)
+		require.Equal(t, []byte{0x01, 0x02, 0x03}, ev.Data)
+	})
+
+	t.Run("Ext32", func(t *testing.T) {
+		in := bytes.NewBuffer([]byte{0xc9, 0x00, 0x00, 0x00, 0x03, 0x0b, 0x01, 0x02, 0x03})
+		v, err := msgpack.Decode(in)
+		require.NoError(t, err)
+		ev := v.(msgpack.Extension)
+		require.Equal(t, int8(11), ev.Type)
+		require.Equal(t, []byte{0x01, 0x02, 0x03}, ev.Data)
+	})
+
+	t.Run("FixExt8", func(t *testing.T) {
+		in := bytes.NewBuffer([]byte{
+			0xd7, 0x01, // fixext8: type=1, 8 data bytes
+			0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+		})
+		v, err := msgpack.Decode(in)
+		require.NoError(t, err)
+		ev := v.(msgpack.Extension)
+		require.Equal(t, int8(1), ev.Type)
+		require.Equal(t, []byte{0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08}, ev.Data)
+	})
+
+	t.Run("FixExt16", func(t *testing.T) {
+		in := bytes.NewBuffer([]byte{
+			0xd8, 0x02, // fixext16: type=2, 16 data bytes
+			0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+			0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10,
+		})
+		v, err := msgpack.Decode(in)
+		require.NoError(t, err)
+		ev := v.(msgpack.Extension)
+		require.Equal(t, int8(2), ev.Type)
+		require.Len(t, ev.Data, 16)
+	})
+}
+
+func TestDecodeIncompleteExtensionTypes(t *testing.T) {
+	t.Run("IncompleteExt8", func(t *testing.T) {
+		in := bytes.NewBuffer([]byte{0xc7, 0x03, 0x09, 0x01}) // missing 2 data bytes
+		_, err := msgpack.Decode(in)
+		require.Error(t, err)
+
+		in = bytes.NewBuffer([]byte{0xc7, 0x03}) // missing type and data
+		_, err = msgpack.Decode(in)
+		require.Error(t, err)
+
+		in = bytes.NewBuffer([]byte{0xc7}) // missing length, type and data
+		_, err = msgpack.Decode(in)
+		require.Error(t, err)
+	})
+
+	t.Run("IncompleteExt16", func(t *testing.T) {
+		in := bytes.NewBuffer([]byte{0xc8, 0x00, 0x03, 0x0a, 0x01}) // missing 2 data bytes
+		_, err := msgpack.Decode(in)
+		require.Error(t, err)
+
+		in = bytes.NewBuffer([]byte{0xc8, 0x00}) // incomplete length
+		_, err = msgpack.Decode(in)
+		require.Error(t, err)
+	})
+
+	t.Run("IncompleteExt32", func(t *testing.T) {
+		in := bytes.NewBuffer([]byte{0xc9, 0x00, 0x00, 0x00, 0x03, 0x0b, 0x01}) // missing 2 data bytes
+		_, err := msgpack.Decode(in)
+		require.Error(t, err)
+
+		in = bytes.NewBuffer([]byte{0xc9, 0x00, 0x00}) // incomplete length
+		_, err = msgpack.Decode(in)
+		require.Error(t, err)
+	})
+}
+
+func TestBinaryTypeOperations(t *testing.T) {
+	b := msgpack.NewBinary([]byte{0x01, 0x02, 0x03})
+	require.Equal(t, msgpack.ValueKindBinary, b.Kind())
+	require.Equal(t, "B010203", b.String())
+
+	// Use Binary as a map key to exercise hash()
+	m := msgpack.NewMap()
+	m.Set(b, msgpack.NewString("value"))
+	v, ok := m.Get(msgpack.NewBinary([]byte{0x01, 0x02, 0x03}))
+	require.True(t, ok)
+	require.Equal(t, msgpack.NewString("value"), v)
+}
+
+func TestArrayTypeOperations(t *testing.T) {
+	a := msgpack.NewArray()
+	require.Empty(t, a)
+
+	a.Append(msgpack.NewInteger(1))
+	a.Append(msgpack.NewString("foo"))
+	require.Len(t, a, 2)
+	require.Equal(t, msgpack.NewInteger(1), a[0])
+	require.Equal(t, msgpack.NewString("foo"), a[1])
+}
+
+func TestExtensionAsMapKey(t *testing.T) {
+	ext := msgpack.Extension{Type: 5, Data: []byte{0x01, 0x02}}
+	m := msgpack.NewMap()
+	m.Set(ext, msgpack.NewString("ext-value"))
+	v, ok := m.Get(ext)
+	require.True(t, ok)
+	require.Equal(t, msgpack.NewString("ext-value"), v)
+}
+
+func TestMapIterateEarlyExit(t *testing.T) {
+	m := msgpack.NewMap()
+	m.Set(msgpack.NewString("key1"), msgpack.NewInteger(1))
+	m.Set(msgpack.NewString("key2"), msgpack.NewInteger(2))
+	m.Set(msgpack.NewString("key3"), msgpack.NewInteger(3))
+
+	count := 0
+	for range m.Iterate() {
+		count++
+		break // triggers yield returning false → exercises the early-exit path
+	}
+	require.Equal(t, 1, count)
 }
