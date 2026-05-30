@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"iter"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -303,8 +304,20 @@ func (m Map) Get(key Value) (Value, bool) {
 
 // Set sets the value for the given key.
 func (m *Map) Set(key Value, value Value) {
-	m.v[key.hash()] = value
+	keyHash := key.hash()
+	if _, exists := m.v[keyHash]; exists {
+		// If the key already exists, we move the key to the end of the slice to maintain the insertion order.
+		m.k = slices.DeleteFunc(m.k, func(k Value) bool { return k.hash() == keyHash })
+	}
 	m.k = append(m.k, key)
+	m.v[key.hash()] = value
+}
+
+// Delete deletes the key-value pair with the given key.
+func (m *Map) Delete(key Value) {
+	keyHash := key.hash()
+	delete(m.v, keyHash)
+	m.k = slices.DeleteFunc(m.k, func(k Value) bool { return k.hash() == keyHash })
 }
 
 func (m Map) hash() mapHashableKey {

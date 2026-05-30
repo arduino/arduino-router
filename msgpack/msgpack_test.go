@@ -989,3 +989,67 @@ func TestMappingKeyHashing(t *testing.T) {
 	require.Equal(t, msgpack.NewInteger(10), isTrue(m.Get(msgpack.NewString("false"))))
 	require.Equal(t, msgpack.NewInteger(11), isTrue(m.Get(amap)))
 }
+
+func TestMappingSetGetDelete(t *testing.T) {
+	m := msgpack.NewMap()
+	m.Set(msgpack.NewString("key1"), msgpack.NewString("value1"))
+	m.Set(msgpack.NewString("key2"), msgpack.NewString("value2"))
+
+	require.Equal(t, 2, m.Len())
+	v, ok := m.Get(msgpack.NewString("key1"))
+	require.True(t, ok)
+	require.Equal(t, msgpack.NewString("value1"), v)
+	v, ok = m.Get(msgpack.NewString("key2"))
+	require.True(t, ok)
+	require.Equal(t, msgpack.NewString("value2"), v)
+
+	m.Delete(msgpack.NewString("key1"))
+	require.Equal(t, 1, m.Len())
+	v, ok = m.Get(msgpack.NewString("key1"))
+	require.False(t, ok)
+	require.Nil(t, v)
+	v, ok = m.Get(msgpack.NewString("key2"))
+	require.True(t, ok)
+	require.Equal(t, msgpack.NewString("value2"), v)
+
+	m.Delete(msgpack.NewString("key2"))
+	require.Equal(t, 0, m.Len())
+	v, ok = m.Get(msgpack.NewString("key1"))
+	require.False(t, ok)
+	require.Nil(t, v)
+	v, ok = m.Get(msgpack.NewString("key2"))
+	require.False(t, ok)
+	require.Nil(t, v)
+}
+
+func TestMappingIterator(t *testing.T) {
+	m := msgpack.NewMap()
+	m.Set(msgpack.NewString("key1"), msgpack.NewString("value1"))
+	m.Set(msgpack.NewString("key2"), msgpack.NewString("value2"))
+	m.Set(msgpack.NewString("key3"), msgpack.NewInteger(3))
+	m.Set(msgpack.NewString("key4"), msgpack.False)
+	m.Set(msgpack.NewString("key5"), msgpack.NewNil())
+	m.Set(msgpack.NewString("key2"), msgpack.NewString("replaced"))
+
+	keys := []msgpack.Value{}
+	values := []msgpack.Value{}
+	for k, v := range m.Iterate() {
+		keys = append(keys, k)
+		values = append(values, v)
+	}
+
+	require.Equal(t, []msgpack.Value{
+		msgpack.NewString("key1"),
+		msgpack.NewString("key3"),
+		msgpack.NewString("key4"),
+		msgpack.NewString("key5"),
+		msgpack.NewString("key2"),
+	}, keys)
+	require.Equal(t, []msgpack.Value{
+		msgpack.NewString("value1"),
+		msgpack.NewInteger(3),
+		msgpack.False,
+		msgpack.NewNil(),
+		msgpack.NewString("replaced"),
+	}, values)
+}
