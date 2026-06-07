@@ -98,7 +98,7 @@ func TestRPCConnection(t *testing.T) {
 			respRes, respErr, err := conn.SendRequest(t.Context(), "helloworld", true)
 			require.NoError(t, err)
 			require.Nil(t, respErr)
-			require.Equal(t, map[string]any{"fakedata": int8(99)}, respRes)
+			require.Equal(t, OrderedMap{{Key: "fakedata", Value: int8(99)}}, respRes)
 		}()
 		msg, err := d.DecodeSlice() // Grab the SendRequest
 		require.NoError(t, err)
@@ -176,4 +176,84 @@ func TestRPCMessageMaxSize(t *testing.T) {
 	err = conn.SendNotification("test", "123456789") // This message should exceed the limit
 	require.ErrorIs(t, err, &ErrBufferLimitExceeded{})
 	time.Sleep(500 * time.Millisecond)
+}
+
+func TestRPCMapParameterOrdering(t *testing.T) {
+	in, testdataIn := nio.Pipe(buffer.New(4096))
+	_, out := nio.Pipe(buffer.New(4096))
+
+	var (
+		wg             sync.WaitGroup
+		receivedParams []any
+	)
+
+	conn := NewConnection(
+		in, out,
+		func(logger FunctionLogger, method string, params []any, res ResponseSender) {
+			defer wg.Done()
+			receivedParams = params
+			_ = res(nil, nil)
+		},
+		func(logger FunctionLogger, method string, params []any) {
+			defer wg.Done()
+			receivedParams = params
+		},
+		nil,
+	)
+	t.Cleanup(conn.Close)
+	go conn.Run()
+
+	enc := msgpack.NewEncoder(testdataIn)
+	enc.UseCompactInts(true)
+	send := func(msg ...any) {
+		require.NoError(t, enc.Encode(msg))
+	}
+
+	orderedKeys := OrderedMap{
+		{Key: "zebra", Value: 0},
+		{Key: "apple", Value: 1},
+		{Key: "mango", Value: 2},
+		{Key: "banana", Value: 3},
+		{Key: "cherry", Value: 4},
+		{Key: "kiwi", Value: 5},
+		{Key: "fig", Value: 6},
+		{Key: "date", Value: 7},
+	}
+	expectedKeys := make([]string, 0, len(orderedKeys))
+	for _, kv := range orderedKeys {
+		expectedKeys = append(expectedKeys, kv.Key)
+	}
+
+	assertReceivedParamsOrdered := func(t *testing.T) {
+		t.Helper()
+		require.Len(t, receivedParams, 1)
+		var actualKeys []string
+		switch m := receivedParams[0].(type) {
+		case OrderedMap:
+			for _, kv := range m {
+				actualKeys = append(actualKeys, kv.Key)
+			}
+		case map[string]any:
+			for k := range m {
+				actualKeys = append(actualKeys, k)
+			}
+		default:
+			t.Fatalf("unexpected params type %T", receivedParams[0])
+		}
+		require.Equal(t, expectedKeys, actualKeys)
+	}
+
+	t.Run("incoming notification preserves key order", func(t *testing.T) {
+		wg.Add(1)
+		send(messageTypeNotification, "notify/test", []any{&orderedKeys})
+		wg.Wait()
+		assertReceivedParamsOrdered(t)
+	})
+
+	t.Run("incoming request preserves key order", func(t *testing.T) {
+		wg.Add(1)
+		send(messageTypeRequest, MessageID(42), "request/test", []any{&orderedKeys})
+		wg.Wait()
+		assertReceivedParamsOrdered(t)
+	})
 }

@@ -124,6 +124,13 @@ func (c *Connection) SetMaxOutgoingMessageSize(size int) {
 
 func (c *Connection) Run() {
 	in := msgpack.NewDecoder(c.in)
+	in.SetMapDecoder(func(d *msgpack.Decoder) (any, error) {
+		var o OrderedMap
+		if err := o.DecodeMsgpack(d); err != nil {
+			return nil, err
+		}
+		return o, nil
+	})
 	for {
 		var data []any
 		start := time.Now()
@@ -313,13 +320,13 @@ func (c *Connection) send(data ...any) error {
 
 		if c.msgpBuffer == nil {
 			// Unlimited buffer size, write directly to the out stream without buffering
-			c.msgpEncoder.Reset(c.out)
+			c.msgpEncoder.ResetWriter(c.out)
 			return c.msgpEncoder.Encode(data)
 		}
 
 		// Limited buffer size, write to the buffer first and then flush it to the out stream
 		c.msgpBuffer.Reset()
-		c.msgpEncoder.Reset(c.msgpBuffer)
+		c.msgpEncoder.ResetWriter(c.msgpBuffer)
 		if err := c.msgpEncoder.Encode(data); err != nil {
 			return err
 		}
