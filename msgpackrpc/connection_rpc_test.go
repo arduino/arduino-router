@@ -92,14 +92,12 @@ func TestRPCConnection(t *testing.T) {
 	}
 
 	{ // Test outgoing request
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			respRes, respErr, err := conn.SendRequest(t.Context(), "helloworld", true)
 			require.NoError(t, err)
 			require.Nil(t, respErr)
 			require.Equal(t, map[string]any{"fakedata": int8(99)}, respRes)
-		}()
+		})
 		msg, err := d.DecodeSlice() // Grab the SendRequest
 		require.NoError(t, err)
 		require.Equal(t, []any{int64(0), int64(1), "helloworld", []any{true}}, msg)

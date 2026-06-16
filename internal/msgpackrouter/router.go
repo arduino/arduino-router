@@ -207,6 +207,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 		},
 	)
 
+	msgpackconn.SetEncodeParamsAsRaw(true)
 	msgpackconn.Run()
 
 	// Unregister the methods when the connection is terminated

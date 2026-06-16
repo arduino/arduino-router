@@ -35,6 +35,7 @@ type Connection struct {
 	requestHandler      RequestHandler
 	notificationHandler NotificationHandler
 	logger              Logger
+	encodeParamsAsRaw   bool
 
 	activeOutRequests      map[MessageID]*outRequest
 	activeOutRequestsMutex sync.Mutex
@@ -124,7 +125,9 @@ func (c *Connection) SetMaxOutgoingMessageSize(size int) {
 
 func (c *Connection) Run() {
 	in := msgpack.NewDecoder(c.in)
-	in.SetMapDecoder(func(d *msgpack.Decoder) (any, error) { return d.DecodeRaw() })
+	if c.encodeParamsAsRaw {
+		in.SetMapDecoder(func(d *msgpack.Decoder) (any, error) { return d.DecodeRaw() })
+	}
 	for {
 		var data []any
 		start := time.Now()
@@ -144,6 +147,10 @@ func (c *Connection) Run() {
 			c.errorHandler(err)
 		}
 	}
+}
+
+func (c *Connection) SetEncodeParamsAsRaw(encodeAsRaw bool) {
+	c.encodeParamsAsRaw = encodeAsRaw
 }
 
 func (c *Connection) processIncomingMessage(data []any) error {
