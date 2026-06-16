@@ -14,9 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/vmihailenco/msgpack/v5"
+
 	"github.com/arduino/arduino-router/internal/msgpackrouter"
 	"github.com/arduino/arduino-router/msgpackrpc"
-	"github.com/vmihailenco/msgpack/v5"
 
 	"github.com/djherbis/buffer"
 	"github.com/djherbis/nio/v3"
