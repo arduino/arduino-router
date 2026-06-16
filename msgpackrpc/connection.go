@@ -124,6 +124,7 @@ func (c *Connection) SetMaxOutgoingMessageSize(size int) {
 
 func (c *Connection) Run() {
 	in := msgpack.NewDecoder(c.in)
+	in.SetMapDecoder(func(d *msgpack.Decoder) (any, error) { return d.DecodeRaw() })
 	for {
 		var data []any
 		start := time.Now()
