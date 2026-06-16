@@ -3,7 +3,7 @@ linters:
   enable:
     - bodyclose
     - dogsled
-    #- goconst
+    - goconst
     - gocritic
     - goprintffuncname
     - gosec

@@ -24,6 +24,9 @@ import (
 
 var hciSocket atomic.Int32
 
+// Common errors
+var errNoHCIDeviceOpen = []any{2, "No HCI device open"}
+
 //nolint:gochecknoinits
 func init() {
 	hciSocket.Store(-1)
@@ -136,7 +139,7 @@ func hciSend(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterR
 
 	fd := hciSocket.Load()
 	if fd < 0 {
-		res(nil, []any{2, "No HCI device open"})
+		res(nil, errNoHCIDeviceOpen)
 		return
 	}
 
@@ -168,7 +171,7 @@ func hciRecv(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterR
 
 	fd := hciSocket.Load()
 	if fd < 0 {
-		res(nil, []any{2, "No HCI device open"})
+		res(nil, errNoHCIDeviceOpen)
 		return
 	}
 
@@ -208,7 +211,7 @@ func hciAvail(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Router
 
 	fd := hciSocket.Load()
 	if fd < 0 {
-		res(nil, []any{2, "No HCI device open"})
+		res(nil, errNoHCIDeviceOpen)
 		return
 	}
 
