@@ -253,21 +253,25 @@ func TestTCPNetworkAPI(t *testing.T) {
 	wg.Wait()
 }
 
+const anyHost = "0.0.0.0"
+const localHost = "127.0.0.1"
+
 func TestUDPNetworkAPI(t *testing.T) {
+
 	var conn1, conn2 any
-	udpConnect(nil, []any{"0.0.0.0", 9800}, func(res, err any) {
+	udpConnect(nil, []any{anyHost, 9800}, func(res, err any) {
 		require.Nil(t, err)
 		conn1 = res
 	})
 
-	udpConnect(nil, []any{"0.0.0.0", 9900}, func(res, err any) {
+	udpConnect(nil, []any{anyHost, 9900}, func(res, err any) {
 		require.Nil(t, err)
 		conn2 = res
 		require.NotEqual(t, conn1, conn2)
 	})
 
 	{
-		udpBeginPacket(nil, []any{conn1, "127.0.0.1", 9900}, func(res, err any) {
+		udpBeginPacket(nil, []any{conn1, localHost, 9900}, func(res, err any) {
 			require.Nil(t, err)
 			require.True(t, res.(bool))
 		})
@@ -283,7 +287,7 @@ func TestUDPNetworkAPI(t *testing.T) {
 	{
 		udpAwaitPacket(nil, []any{conn2}, func(res, err any) {
 			require.Nil(t, err)
-			require.Equal(t, []any{5, "127.0.0.1", 9800}, res)
+			require.Equal(t, []any{5, localHost, 9800}, res)
 		})
 		udpRead(nil, []any{conn2, 100}, func(res2, err any) {
 			require.Nil(t, err)
@@ -291,7 +295,7 @@ func TestUDPNetworkAPI(t *testing.T) {
 		})
 	}
 	{
-		udpBeginPacket(nil, []any{conn1, "127.0.0.1", 9900}, func(res, err any) {
+		udpBeginPacket(nil, []any{conn1, localHost, 9900}, func(res, err any) {
 			require.Nil(t, err)
 			require.True(t, res.(bool))
 		})
@@ -309,7 +313,7 @@ func TestUDPNetworkAPI(t *testing.T) {
 		})
 	}
 	{
-		udpBeginPacket(nil, []any{conn1, "127.0.0.1", 9900}, func(res, err any) {
+		udpBeginPacket(nil, []any{conn1, localHost, 9900}, func(res, err any) {
 			require.Nil(t, err)
 			require.True(t, res.(bool))
 		})
@@ -325,7 +329,7 @@ func TestUDPNetworkAPI(t *testing.T) {
 	{
 		udpAwaitPacket(nil, []any{conn2}, func(res, err any) {
 			require.Nil(t, err)
-			require.Equal(t, []any{3, "127.0.0.1", 9800}, res)
+			require.Equal(t, []any{3, localHost, 9800}, res)
 		})
 
 		// A partial read of a packet is allowed
@@ -339,7 +343,7 @@ func TestUDPNetworkAPI(t *testing.T) {
 		// the next packet can be received
 		udpAwaitPacket(nil, []any{conn2}, func(res, err any) {
 			require.Nil(t, err)
-			require.Equal(t, []any{3, "127.0.0.1", 9800}, res)
+			require.Equal(t, []any{3, localHost, 9800}, res)
 		})
 
 		udpRead(nil, []any{conn2, 100}, func(res2, err any) {
@@ -368,14 +372,14 @@ func TestUDPNetworkUnboundClientAPI(t *testing.T) {
 		require.Nil(t, err)
 	})
 
-	udpConnect(nil, []any{"0.0.0.0", 9901}, func(result, err any) {
+	udpConnect(nil, []any{anyHost, 9901}, func(result, err any) {
 		conn2 = result
 		require.Nil(t, err)
 	})
 	require.NotEqual(t, conn1, conn2)
 
 	{
-		udpBeginPacket(nil, []any{conn1, "127.0.0.1", 9901}, func(res, err any) {
+		udpBeginPacket(nil, []any{conn1, localHost, 9901}, func(res, err any) {
 			require.Nil(t, err)
 			require.True(t, res.(bool))
 		})
@@ -403,7 +407,7 @@ func TestUDPNetworkUnboundClientAPI(t *testing.T) {
 		})
 	}
 	{
-		udpBeginPacket(nil, []any{conn1, "127.0.0.1", 9901}, func(res, err any) {
+		udpBeginPacket(nil, []any{conn1, localHost, 9901}, func(res, err any) {
 			require.Nil(t, err)
 			require.True(t, res.(bool))
 		})
@@ -417,7 +421,7 @@ func TestUDPNetworkUnboundClientAPI(t *testing.T) {
 		})
 	}
 	{
-		udpBeginPacket(nil, []any{conn1, "127.0.0.1", 9901}, func(res, err any) {
+		udpBeginPacket(nil, []any{conn1, localHost, 9901}, func(res, err any) {
 			require.Nil(t, err)
 			require.True(t, res.(bool))
 		})
@@ -454,7 +458,7 @@ func TestUDPNetworkUnboundClientAPI(t *testing.T) {
 	// Check timeouts
 	go func() {
 		time.Sleep(200 * time.Millisecond)
-		udpBeginPacket(nil, []any{conn1, "127.0.0.1", 9901}, func(res, err any) {
+		udpBeginPacket(nil, []any{conn1, localHost, 9901}, func(res, err any) {
 			require.Nil(t, err)
 			require.True(t, res.(bool))
 		})

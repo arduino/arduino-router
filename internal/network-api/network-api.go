@@ -54,6 +54,13 @@ var udpWriteTargets = make(map[uint]*net.UDPAddr)
 var udpWriteBuffers = make(map[uint][]byte)
 var nextConnectionID atomic.Uint32
 
+// Common errors
+var errInvalidServerAddressType = []any{1, "Invalid parameter type, expected string for server address"}
+var errInvalidServerPortType = []any{1, "Invalid parameter type, expected uint16 for server port"}
+var errInvalidUDPConnectionIDType = []any{1, "Invalid parameter type, expected int for UDP connection ID"}
+var errInvalidConnectionIDType = []any{1, "Invalid parameter type, expected int for connection ID"}
+var errInvalidUDPUIntIDType = []any{1, "Invalid parameter type, expected uint for UDP connection ID"}
+
 // takeLockAndGenerateNextID generates a new unique ID for a connection or listener.
 // It locks the global lock to ensure thread safety and checks for existing IDs.
 // It returns the new ID and a function to unlock the global lock.
@@ -78,12 +85,12 @@ func tcpConnect(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Rout
 	}
 	serverAddr, ok := params[0].(string)
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected string for server address"})
+		res(nil, errInvalidServerAddressType)
 		return
 	}
 	serverPort, ok := msgpackrpc.ToUint(params[1])
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected uint16 for server port"})
+		res(nil, errInvalidServerPortType)
 		return
 	}
 
@@ -174,7 +181,7 @@ func tcpClose(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Router
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected int for connection ID"})
+		res(nil, errInvalidConnectionIDType)
 		return
 	}
 
@@ -240,7 +247,7 @@ func tcpRead(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterR
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected int for connection ID"})
+		res(nil, errInvalidConnectionIDType)
 		return
 	}
 	lock.RLock()
@@ -291,7 +298,7 @@ func tcpWrite(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Router
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected int for connection ID"})
+		res(nil, errInvalidConnectionIDType)
 		return
 	}
 	lock.RLock()
@@ -329,12 +336,12 @@ func tcpConnectSSL(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.R
 	}
 	serverAddr, ok := params[0].(string)
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected string for server address"})
+		res(nil, errInvalidServerAddressType)
 		return
 	}
 	serverPort, ok := msgpackrpc.ToUint(params[1])
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected uint16 for server port"})
+		res(nil, errInvalidServerPortType)
 		return
 	}
 
@@ -383,12 +390,12 @@ func udpConnect(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Rout
 	}
 	serverAddr, ok := params[0].(string)
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected string for server address"})
+		res(nil, errInvalidServerAddressType)
 		return
 	}
 	serverPort, ok := msgpackrpc.ToUint(params[1])
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected uint16 for server port"})
+		res(nil, errInvalidServerPortType)
 		return
 	}
 
@@ -419,17 +426,17 @@ func udpBeginPacket(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected int for UDP connection ID"})
+		res(nil, errInvalidUDPConnectionIDType)
 		return
 	}
 	targetIP, ok := params[1].(string)
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected string for server address"})
+		res(nil, errInvalidServerAddressType)
 		return
 	}
 	targetPort, ok := msgpackrpc.ToUint(params[2])
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected uint16 for server port"})
+		res(nil, errInvalidServerPortType)
 		return
 	}
 
@@ -457,7 +464,7 @@ func udpWrite(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Router
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected int for UDP connection ID"})
+		res(nil, errInvalidUDPConnectionIDType)
 		return
 	}
 	data, ok := params[1].([]byte)
@@ -491,7 +498,7 @@ func udpEndPacket(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Ro
 	}
 	id, buffExists := msgpackrpc.ToUint(params[0])
 	if !buffExists {
-		res(nil, []any{1, "Invalid parameter type, expected int for UDP connection ID"})
+		res(nil, errInvalidUDPConnectionIDType)
 		return
 	}
 
@@ -529,7 +536,7 @@ func udpAwaitPacket(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected uint for UDP connection ID"})
+		res(nil, errInvalidUDPUIntIDType)
 		return
 	}
 	var deadline time.Time // default value == no timeout
@@ -590,7 +597,7 @@ func udpDropPacket(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.R
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected uint for UDP connection ID"})
+		res(nil, errInvalidUDPUIntIDType)
 		return
 	}
 
@@ -611,7 +618,7 @@ func udpRead(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterR
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected uint for UDP connection ID"})
+		res(nil, errInvalidUDPUIntIDType)
 		return
 	}
 	maxBytes, ok := msgpackrpc.ToUint(params[1])
@@ -644,7 +651,7 @@ func udpClose(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Router
 	}
 	id, ok := msgpackrpc.ToUint(params[0])
 	if !ok {
-		res(nil, []any{1, "Invalid parameter type, expected uint for UDP connection ID"})
+		res(nil, errInvalidUDPUIntIDType)
 		return
 	}
 
