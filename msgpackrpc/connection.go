@@ -7,6 +7,7 @@ package msgpackrpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -26,15 +27,16 @@ const (
 
 // Connection is a MessagePack-RPC connection
 type Connection struct {
-	in                  io.ReadCloser
-	out                 io.WriteCloser
-	msgpEncoder         *msgpack.Encoder
-	msgpBuffer          *LimitedBuffer
-	outMutex            sync.Mutex
-	errorHandler        ErrorHandler
-	requestHandler      RequestHandler
-	notificationHandler NotificationHandler
-	logger              Logger
+	in                      io.ReadCloser
+	out                     io.WriteCloser
+	msgpEncoder             *msgpack.Encoder
+	msgpBuffer              *LimitedBuffer
+	outMutex                sync.Mutex
+	errorHandler            ErrorHandler
+	requestHandler          RequestHandler
+	notificationHandler     NotificationHandler
+	logger                  Logger
+	paramsAndResponsesAsRaw bool
 
 	activeOutRequests      map[MessageID]*outRequest
 	activeOutRequestsMutex sync.Mutex
@@ -122,80 +124,164 @@ func (c *Connection) SetMaxOutgoingMessageSize(size int) {
 	c.msgpBuffer = NewLimitedBuffer(size)
 }
 
+// SetKeepParamsAndResponsesAsRaw sets whether to keep the parameters and responses as raw bytes when decoding them.
+// When set to true, the parameters and responses will be kept as msgpack.RawMessage, allowing for lazy decoding.
+func (c *Connection) SetKeepParamsAndResponsesAsRaw(keepAsRaw bool) {
+	c.paramsAndResponsesAsRaw = keepAsRaw
+}
+
+type rpcPacket struct {
+	msgType   int
+	msgID     MessageID
+	method    string
+	params    []any
+	reqError  any
+	reqResult any
+}
+
+// decodeRpcPacket decodes a MessagePack-RPC packet from the given decoder.
+// It returns an rpcPacket struct containing the decoded data, or an error
+// if the packet is invalid, in such case the invalid packet is skipped.
+func (c *Connection) decodeRpcPacket(in *msgpack.Decoder) (rpcPacket, error) {
+	// This function is used to skip the invalid packet and return an error.
+	// n elements will be skipped from the decoder, and the error will be returned.
+	// If also skipping fails, the skipping error will be returned, with the original error incorporated.
+	skipAndError := func(n int, err error) (rpcPacket, error) {
+		for range n {
+			if skipErr := in.Skip(); skipErr != nil {
+				return rpcPacket{}, fmt.Errorf("failed to skip invalid packet: %w; invalid packet: %v", skipErr, err)
+			}
+		}
+		return rpcPacket{}, err
+	}
+
+	l, err := in.DecodeArrayLen()
+	if err != nil {
+		return skipAndError(1, fmt.Errorf("invalid packet, expected array: %w", err))
+	}
+
+	if l < 3 || l > 4 {
+		return skipAndError(l, errors.New("invalid packet, expected array with 3 or 4 elements"))
+	}
+
+	var packet rpcPacket
+	if msgType, err := in.DecodeInt(); err != nil {
+		return skipAndError(l, fmt.Errorf("invalid packet, expected int for message type: %w", err))
+	} else {
+		packet.msgType = msgType
+		l--
+		switch msgType {
+		case messageTypeRequest, messageTypeResponse:
+			if l != 3 {
+				return skipAndError(l, errors.New("invalid packet, expected array with 4 elements for request or response"))
+			}
+		case messageTypeNotification:
+			if l != 2 {
+				return skipAndError(l, errors.New("invalid packet, expected array with 3 elements for notification"))
+			}
+		default:
+			return skipAndError(l, errors.New("invalid packet, expected request, response or notification"))
+		}
+	}
+
+	// Decode the message ID for requests and responses
+	switch packet.msgType {
+	case messageTypeRequest, messageTypeResponse:
+		if id, err := in.DecodeUint(); err != nil {
+			return skipAndError(l, fmt.Errorf("invalid packet, expected uint for message ID: %w", err))
+		} else {
+			packet.msgID = MessageID(id)
+			l--
+		}
+	}
+
+	switch packet.msgType {
+	case messageTypeRequest, messageTypeNotification:
+		if method, err := in.DecodeString(); err != nil {
+			return skipAndError(l, fmt.Errorf("invalid packet, expected string for method name: %w", err))
+		} else {
+			packet.method = method
+			l--
+		}
+
+		paramLen, err := in.DecodeArrayLen()
+		if err != nil {
+			return skipAndError(l, fmt.Errorf("invalid packet, expected array for params: %w", err))
+		}
+		l--
+		if paramLen < 0 {
+			return skipAndError(l, fmt.Errorf("invalid packet, error decoding params: expected array, got Nil"))
+		}
+
+		// Now remains only the params to decode, which is an array of length paramLen
+
+		packet.params = make([]any, paramLen)
+		toSkip := paramLen
+		for i := range paramLen {
+			var p any
+			if c.paramsAndResponsesAsRaw {
+				p, err = in.DecodeRaw()
+			} else {
+				p, err = in.DecodeInterface()
+			}
+			if err != nil {
+				return skipAndError(toSkip, fmt.Errorf("invalid packet, error decoding param %d: %w", i, err))
+			}
+			packet.params[i] = p
+			toSkip--
+		}
+
+	case messageTypeResponse:
+		if c.paramsAndResponsesAsRaw {
+			if e, err := in.DecodeRaw(); err != nil {
+				return skipAndError(l, fmt.Errorf("invalid packet, error decoding response: %w", err))
+			} else {
+				packet.reqError = e
+				l--
+			}
+			if r, err := in.DecodeRaw(); err != nil {
+				return skipAndError(l, fmt.Errorf("invalid packet, error decoding response: %w", err))
+			} else {
+				packet.reqResult = r
+			}
+		} else {
+			if e, err := in.DecodeInterface(); err != nil {
+				return skipAndError(l, fmt.Errorf("invalid packet, error decoding response: %w", err))
+			} else {
+				packet.reqError = e
+				l--
+			}
+			if r, err := in.DecodeInterface(); err != nil {
+				return skipAndError(l, fmt.Errorf("invalid packet, error decoding response: %w", err))
+			} else {
+				packet.reqResult = r
+			}
+		}
+	}
+
+	return packet, nil
+}
+
 func (c *Connection) Run() {
 	in := msgpack.NewDecoder(c.in)
 	for {
-		var data []any
 		start := time.Now()
-		if v, err := in.DecodeInterface(); err != nil {
-			c.errorHandler(fmt.Errorf("can't read packet: %w", err))
-			return // unrecoverable
-		} else if s, ok := v.([]any); !ok {
-			c.errorHandler(fmt.Errorf("invalid packet, expected array, got: %T", v))
-			continue // ignore invalid packets
-		} else {
-			data = s
+		packet, err := c.decodeRpcPacket(in)
+		if err != nil {
+			c.errorHandler(fmt.Errorf("decoding packet: %w", err))
+			continue
 		}
 		elapsed := time.Since(start)
 		c.logger.LogIncomingDataDelay(elapsed)
 
-		if err := c.processIncomingMessage(data); err != nil {
-			c.errorHandler(err)
+		switch packet.msgType {
+		case messageTypeRequest:
+			c.handleIncomingRequest(packet.msgID, packet.method, packet.params)
+		case messageTypeResponse:
+			c.handleIncomingResponse(packet.msgID, packet.reqError, packet.reqResult)
+		case messageTypeNotification:
+			c.handleIncomingNotification(packet.method, packet.params)
 		}
-	}
-}
-
-func (c *Connection) processIncomingMessage(data []any) error {
-	if len(data) < 3 {
-		return fmt.Errorf("invalid packet, expected array with at least 3 elements")
-	}
-
-	msgType, ok := ToInt(data[0])
-	if !ok {
-		return fmt.Errorf("invalid packet, expected int as first element, got %T", data[0])
-	}
-
-	switch msgType {
-	case messageTypeRequest:
-		if len(data) != 4 {
-			return fmt.Errorf("invalid request, expected array with 4 elements")
-		}
-		if id, ok := ToUint(data[1]); !ok {
-			return fmt.Errorf("invalid request, expected msgid (uint) as second element")
-		} else if method, ok := data[2].(string); !ok {
-			return fmt.Errorf("invalid request, expected method (string) as third element")
-		} else if params, ok := data[3].([]any); !ok {
-			return fmt.Errorf("invalid request, expected params (array) as fourth element")
-		} else {
-			c.handleIncomingRequest(MessageID(id), method, params)
-		}
-		return nil
-	case messageTypeResponse:
-		if len(data) != 4 {
-			return fmt.Errorf("invalid response, expected array with 4 elements")
-		}
-		if id, ok := ToUint(data[1]); !ok {
-			return fmt.Errorf("invalid response, expected msgid (uint) as second element")
-		} else {
-			reqError := data[2]
-			reqResult := data[3]
-			c.handleIncomingResponse(MessageID(id), reqError, reqResult)
-		}
-		return nil
-	case messageTypeNotification:
-		if len(data) != 3 {
-			return fmt.Errorf("invalid notification, expected array with 3 elements")
-		}
-		if method, ok := data[1].(string); !ok {
-			return fmt.Errorf("invalid notification, expected method (string) as second element")
-		} else if params, ok := data[2].([]any); !ok {
-			return fmt.Errorf("invalid notification, expected params (array) as third element")
-		} else {
-			c.handleIncomingNotification(method, params)
-		}
-		return nil
-	default:
-		return fmt.Errorf("invalid packet, expected request, response or notification")
 	}
 }
 
