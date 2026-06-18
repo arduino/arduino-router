@@ -6,12 +6,15 @@
 package msgpackrouter
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"maps"
 	"sync"
+
+	"github.com/vmihailenco/msgpack/v5"
 
 	"github.com/arduino/arduino-router/msgpackrpc"
 )
@@ -57,14 +60,46 @@ func (r *Router) RegisterMethod(method string, handler RouterRequestHandler) err
 	return nil
 }
 
+// rawParams is a wrapper around the raw parameters received from the msgpackrpc connection.
+// It allows for lazy decoding of the parameters only when needed.
+type rawParams struct {
+	raw     []any
+	decoded []any
+}
+
+// Get returns the decoded parameters. If the parameters have already been decoded, it returns the cached version.
+func (r *rawParams) Get() []any {
+	if len(r.raw) == 0 {
+		return r.raw
+	}
+	if r.decoded != nil {
+		return r.decoded
+	}
+
+	r.decoded = make([]any, len(r.raw))
+	for i, p := range r.raw {
+		if raw, ok := p.(msgpack.RawMessage); ok {
+			_ = msgpack.Unmarshal(raw, &r.decoded[i])
+		} else {
+			r.decoded[i] = p
+		}
+	}
+	return r.decoded
+}
+
 func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 	defer conn.Close()
 
 	var msgpackconn *msgpackrpc.Connection
 	msgpackconn = msgpackrpc.NewConnection(conn, conn,
-		func(_ msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseSender) {
-			// This handler is called when a request is received from the client
-			slog.Debug("Received request", "method", method, "params", params)
+		func(_ msgpackrpc.FunctionLogger, method string, raw []any, res msgpackrpc.ResponseSender) {
+			params := &rawParams{raw: raw}
+
+			// Log the received request and its parameters if debug logging is enabled
+			// This allows to use params.Get() to decode the parameters only when needed
+			if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
+				slog.Debug("Received request", "method", method, "params", params.Get())
+			}
 
 			fwdRes := func(reqResult any, reqErr any) {
 				// This handler is used to send the response back to the original caller.
@@ -83,55 +118,48 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			switch method {
 			case "$/register":
 				// Check if the client is trying to register a new method
-				if len(params) != 1 {
-					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params))))
-					return
-				} else if methodToRegister, ok := params[0].(string); !ok {
-					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: expected string, got %T", params[0])))
-					return
+				if len(params.Get()) != 1 {
+					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params.Get()))))
+				} else if methodToRegister, ok := params.Get()[0].(string); !ok {
+					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: expected string, got %T", params.Get()[0])))
 				} else if err := r.registerMethod(methodToRegister, msgpackconn); err != nil {
 					if rae, ok := err.(*RouteError); ok {
 						fwdRes(nil, rae.ToEncodedError())
-						return
+					} else {
+						fwdRes(nil, routerError(ErrCodeGenericError, err.Error()))
 					}
-					fwdRes(nil, routerError(ErrCodeGenericError, err.Error()))
-					return
 				} else {
 					fwdRes(true, nil)
-					return
 				}
+				return
 			case "$/reset":
 				// Check if the client is trying to remove its registered methods
-				if len(params) != 0 {
+				if len(params.Get()) != 0 {
 					fwdRes(nil, routerError(ErrCodeInvalidParams, "invalid params: no params are expected"))
-					return
 				} else {
 					r.removeMethodsFromConnection(msgpackconn)
 					fwdRes(true, nil)
-					return
 				}
+				return
 			case "$/setMaxMsgSize":
 				// Fix the buffer size for the connection, if a bigger message is received, it will be rejected
-				if len(params) != 1 {
-					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params))))
-					return
-				} else if maxBuffSize, ok := msgpackrpc.ToInt(params[0]); !ok {
-					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: expected int, got %T", params[0])))
-					return
+				if len(params.Get()) != 1 {
+					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params.Get()))))
+				} else if maxBuffSize, ok := msgpackrpc.ToInt(params.Get()[0]); !ok {
+					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: expected int, got %T", params.Get()[0])))
 				} else if maxBuffSize <= 127 {
 					fwdRes(nil, routerError(ErrCodeInvalidParams, "invalid params: max buffer size must be greater than 127"))
-					return
 				} else {
 					msgpackconn.SetMaxOutgoingMessageSize(maxBuffSize)
 					fwdRes(true, nil)
-					return
 				}
+				return
 			}
 
 			// Check if the method is an internal method
 			if handler, ok := r.routesInternal[method]; ok {
 				// Call the internal method handler
-				handler(msgpackconn, params, fwdRes)
+				handler(msgpackconn, params.Get(), fwdRes)
 				return
 			}
 
@@ -145,7 +173,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			// Forward the call to the registered client
 			err := client.SendRequestWithAsyncResult(
 				fwdRes, // Send the response back to the original caller
-				method, params...)
+				method, raw...)
 			if errors.Is(err, &msgpackrpc.ErrBufferLimitExceeded{}) {
 				slog.Error("Request exceeded buffer limit", "method", method)
 				fwdRes(nil, routerError(ErrCodeBufferLimitExceeded, "message size exceeds the limit"))
@@ -157,31 +185,33 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 				return
 			}
 		},
-		func(_ msgpackrpc.FunctionLogger, method string, params []any) {
-			// This handler is called when a notification is received from the client
-			slog.Debug("Received notification", "method", method, "params", params)
+		func(_ msgpackrpc.FunctionLogger, method string, raw []any) {
+			params := &rawParams{raw: raw}
+
+			// Log the received notification and its parameters if debug logging is enabled
+			// This allows to use params.Get() to decode the parameters only when needed
+			if slog.Default().Enabled(context.Background(), slog.LevelDebug) {
+				slog.Debug("Received notification", "method", method, "params", params.Get())
+			}
 
 			if method == "$/setMaxMsgSize" {
 				// Fix the buffer size for the connection, if a bigger message is received, it will be rejected
-				if len(params) != 1 {
-					slog.Error(fmt.Sprintf("invalid params: only one param is expected, got %d", len(params)))
-					return
-				} else if maxBuffSize, ok := msgpackrpc.ToInt(params[0]); !ok {
-					slog.Error(fmt.Sprintf("invalid params: expected int, got %T", params[0]))
-					return
+				if len(params.Get()) != 1 {
+					slog.Error(fmt.Sprintf("invalid params: only one param is expected, got %d", len(params.Get())))
+				} else if maxBuffSize, ok := msgpackrpc.ToInt(params.Get()[0]); !ok {
+					slog.Error(fmt.Sprintf("invalid params: expected int, got %T", params.Get()[0]))
 				} else if maxBuffSize <= 127 {
 					slog.Error("invalid params: max buffer size must be greater than 127")
-					return
 				} else {
 					msgpackconn.SetMaxOutgoingMessageSize(maxBuffSize)
-					return
 				}
+				return
 			}
 
 			// Check if the method is an internal method
 			if handler, ok := r.routesInternal[method]; ok {
 				// call the internal method handler (since it's a notification, discard the result)
-				handler(msgpackconn, params, func(_, _ any) {})
+				handler(msgpackconn, params.Get(), func(_, _ any) {})
 				return
 			}
 
@@ -193,7 +223,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 			}
 
 			// Forward the notification to the registered client
-			if err := client.SendNotification(method, params...); err != nil {
+			if err := client.SendNotification(method, raw...); err != nil {
 				slog.Error("Failed to send notification", "method", method, "err", err)
 				return
 			}
@@ -207,6 +237,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 		},
 	)
 
+	msgpackconn.SetKeepParamsAndResponsesAsRaw(true)
 	msgpackconn.Run()
 
 	// Unregister the methods when the connection is terminated
