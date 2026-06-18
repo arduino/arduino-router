@@ -278,3 +278,76 @@ func TestRouterMaxMsgSize(t *testing.T) {
 		require.NoError(t, err)
 	}
 }
+
+func TestRouterKeepsParamaterUnchanged(t *testing.T) {
+	ch1a, ch1b := newFullPipe()
+	ch2a, ch2b := newFullPipe()
+
+	router := msgpackrouter.New()
+	router.Accept(ch1b)
+	router.Accept(ch2b)
+
+	/*
+		We want to test that the router keeps the parameters unchanged, without re-encoding them.
+		So we send a complicated object from cl2 to cl1, and check that cl1 receives the exact same bytes.
+
+		The object is:
+		[
+			{
+				"int": 1,
+				"float": 0.5,
+				"boolean": true,
+				"null": null,
+				"string": "foo bar",
+				"array": [
+					"foo",
+					"bar"
+				],
+				"object": {
+					"foo": 1,
+					"baz": 0.5
+				}
+			}
+		]
+	*/
+	complicatedObject := msgpack.RawMessage{
+		0x91, 0x87, 0xA3, 0x69, 0x6E, 0x74, 0x01, 0xA5, 0x66, 0x6C, 0x6F,
+		0x61, 0x74, 0xCB, 0x3F, 0xE0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		0xA7, 0x62, 0x6F, 0x6F, 0x6C, 0x65, 0x61, 0x6E, 0xC3, 0xA4, 0x6E,
+		0x75, 0x6C, 0x6C, 0xC0, 0xA6, 0x73, 0x74, 0x72, 0x69, 0x6E, 0x67,
+		0xA7, 0x66, 0x6F, 0x6F, 0x20, 0x62, 0x61, 0x72, 0xA5, 0x61, 0x72,
+		0x72, 0x61, 0x79, 0x92, 0xA3, 0x66, 0x6F, 0x6F, 0xA3, 0x62, 0x61,
+		0x72, 0xA6, 0x6F, 0x62, 0x6A, 0x65, 0x63, 0x74, 0x82, 0xA3, 0x66,
+		0x6F, 0x6F, 0x01, 0xA3, 0x62, 0x61, 0x7A, 0xCB, 0x3F, 0xE0, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00,
+	}
+
+	// Register "test" method on cl2
+	w2 := msgpack.NewEncoder(ch2a)
+	r2 := msgpack.NewDecoder(ch2a)
+	require.NoError(t, w2.Encode([]any{0, 1, "$/register", []any{"test"}}))
+	resp, err := r2.DecodeSlice()
+	require.NoError(t, err)
+	require.Equal(t, []any{int8(1), int8(1), nil, true}, resp) // Check that the registration succeeded
+
+	for range 10 {
+		// Send notitication from cl1 to cl2 with the complicated object as parameter
+		w1 := msgpack.NewEncoder(ch1a)
+		r1 := msgpack.NewDecoder(ch2a)
+		require.NoError(t, w1.Encode([]any{2, "test", complicatedObject}))
+
+		// Check that cl2 receives the notification with the exact same bytes
+		l, err := r1.DecodeArrayLen() // Decode the array header
+		require.NoError(t, err)
+		require.Equal(t, 3, l)
+		code, err := r1.DecodeInt() // Decode the code (2 == NOTIFICATION)
+		require.NoError(t, err)
+		require.Equal(t, 2, code)
+		method, err := r1.DecodeString() // Decode the method
+		require.NoError(t, err)
+		require.Equal(t, "test", method)
+		params, err := r1.DecodeRaw() // Decode the parameters as raw bytes
+		require.NoError(t, err)
+		require.Equal(t, complicatedObject, params) // Check that the parameters are exactly the same bytes as we sent
+	}
+}
