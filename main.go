@@ -255,7 +255,7 @@ func startRouter(ctx context.Context, cfg Config) error {
 				wr := &MsgpackDebugStream{Name: cfg.SerialPortAddr, Upstream: serialPort}
 
 				// wait for the close command from RPC or for a failure of the serial port (routerExit)
-				routerExit := router.Accept(wr)
+				routerExit := router.AcceptAndSendNotification(wr)
 				select {
 				case <-routerExit:
 					slog.Debug("Serial port failed connection")
