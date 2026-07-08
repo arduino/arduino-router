@@ -15,13 +15,13 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"sync"
 	"syscall"
 	"time"
 
 	"github.com/arduino/go-paths-helper"
-	discovery "github.com/arduino/pluggable-discovery-protocol-handler/v2"
-	ssync "github.com/arduino/serial-discovery/sync"
+	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
 	"go.bug.st/cleanup"
 	"go.bug.st/f"
@@ -321,24 +321,46 @@ func startRouter(ctx context.Context, cfg Config) error {
 }
 
 func waitForPort(ctx context.Context, waitPort string) error {
-	wait := make(chan struct{})
-	kill, err := ssync.Start(func(event string, port *discovery.Port) {
-		if event == "add" && port.Address == waitPort {
-			slog.Debug("Serial port detected", "serial", port.Address)
-			wait <- struct{}{}
-		}
-	}, func(msg string) {
-		slog.Debug("Wait for serial error", "error", msg)
-	})
+	target := filepath.Clean(waitPort)
+
+	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
 	}
-	defer func() { kill <- true }()
+	defer watcher.Close()
 
-	select {
-	case <-wait:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	// add nearest existing ancestor directory to the watcher
+	dir := filepath.Dir(target)
+	for {
+		if _, err := os.Stat(dir); err == nil {
+			break
+		}
+		p := filepath.Dir(dir)
+		if p == dir {
+			return fmt.Errorf("no existing ancestor directory for %s", target)
+		}
+		dir = p
+	}
+	if err := watcher.Add(dir); err != nil {
+		return err
+	}
+
+	for {
+		if _, err := os.Lstat(target); err == nil {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case err := <-watcher.Errors:
+			return err
+		case ev := <-watcher.Events:
+			if ev.Op&fsnotify.Create != 0 {
+				// add new directory to the watcher
+				if info, err := os.Stat(ev.Name); err == nil && info.IsDir() {
+					_ = watcher.Add(ev.Name)
+				}
+			}
+		}
 	}
 }
