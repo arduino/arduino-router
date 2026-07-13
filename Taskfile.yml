@@ -53,7 +53,7 @@ tasks:
     desc: Run all the linters
     cmds:
       - task: lint:reuse
-      - task: lint:go {{ .CLI_ARGS }}
+      - task: lint:go
       - task: lint:fmt
 
   lint:reuse:
