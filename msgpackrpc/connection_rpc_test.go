@@ -224,3 +224,63 @@ func TestFixIntHandling(t *testing.T) {
 		expectReadHex(t, testdataOut, "9302a162910a") // [2, "b", [10]]
 	}
 }
+func TestRPCConnectionRecover(t *testing.T) {
+	in, testdataIn := nio.Pipe(buffer.New(1024))
+	testdataOut, out := nio.Pipe(buffer.New(1024))
+
+	enc := msgpack.NewEncoder(testdataIn)
+	enc.UseCompactInts(true)
+	send := func(msg ...any) {
+		require.NoError(t, enc.Encode(msg))
+	}
+
+	d := msgpack.NewDecoder(testdataOut)
+	d.UseLooseInterfaceDecoding(true)
+
+	conn := NewConnection(
+		in, out,
+		func(logger FunctionLogger, method string, params []any, res ResponseSender) {
+			// Return a big response
+			require.NoError(t, res("123", nil))
+		},
+		func(logger FunctionLogger, method string, params []any) {
+			// Should receive only small notifications
+			require.Equal(t, "hi", params[0].(string))
+		},
+		func(e error) {
+			fmt.Println("ERROR HANDLER CALLED:", e)
+		},
+	)
+
+	// Start the connection loop
+	go conn.Run()
+	t.Cleanup(conn.Close)
+
+	// Send a valid request and check the response
+	send(messageTypeRequest, MessageID(1), "test", []any{})
+	var resp any
+	require.NoError(t, d.Decode(&resp))
+	require.Equal(t, []any{int64(1), int64(1), nil, "123"}, resp)
+
+	// Send an invalid message to trigger an error
+	send(1, 2, 3) // Invalid message format
+
+	// Send another valid request and check the response
+	send(messageTypeRequest, MessageID(2), "test", []any{})
+	var resp2 any
+	require.NoError(t, d.Decode(&resp2))
+	require.Equal(t, []any{int64(1), int64(2), nil, "123"}, resp2)
+
+	// Send a truncated message followed by a sequence to drain the incomplete message
+	call := []byte{0x94, 0x00, 0x03, 0xA4, 0x74, 0x65, 0x73, 0x74, 0x90} // Encoding of [0, 3, "test", []]
+	_, err := testdataIn.Write(call[:5])                                 // Send incomplete RPC message
+	require.NoError(t, err)
+	_, err = testdataIn.Write([]byte{0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0}) // Send a sequence of NIL to drain the incomplete message
+	require.NoError(t, err)
+
+	// Send another valid request and check the response
+	send(messageTypeRequest, MessageID(3), "test", []any{})
+	var resp3 any
+	require.NoError(t, d.Decode(&resp3))
+	require.Equal(t, []any{int64(1), int64(3), nil, "123"}, resp3)
+}

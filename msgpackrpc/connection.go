@@ -139,6 +139,22 @@ type rpcPacket struct {
 	reqResult any
 }
 
+type invalidRPCMessageError struct {
+	msg   string
+	cause error
+}
+
+func (e *invalidRPCMessageError) Error() string {
+	if e.cause != nil {
+		return fmt.Sprintf("%s: %v", e.msg, e.cause)
+	}
+	return e.msg
+}
+
+func (e *invalidRPCMessageError) Unwrap() error {
+	return e.cause
+}
+
 // decodeRpcPacket decodes a MessagePack-RPC packet from the given decoder.
 // It returns an rpcPacket struct containing the decoded data, or an error
 // if the packet is invalid, in such case the invalid packet is skipped.
@@ -157,30 +173,30 @@ func (c *Connection) decodeRpcPacket(in *msgpack.Decoder) (rpcPacket, error) {
 
 	l, err := in.DecodeArrayLen()
 	if err != nil {
-		return skipAndError(1, fmt.Errorf("invalid packet, expected array: %w", err))
+		return skipAndError(1, &invalidRPCMessageError{msg: "invalid packet, expected array", cause: err})
 	}
 
 	if l < 3 || l > 4 {
-		return skipAndError(l, errors.New("invalid packet, expected array with 3 or 4 elements"))
+		return skipAndError(l, &invalidRPCMessageError{msg: "invalid packet, expected array with 3 or 4 elements"})
 	}
 
 	var packet rpcPacket
 	if msgType, err := in.DecodeInt(); err != nil {
-		return skipAndError(l, fmt.Errorf("invalid packet, expected int for message type: %w", err))
+		return skipAndError(l, &invalidRPCMessageError{msg: "invalid packet, expected int for message type", cause: err})
 	} else {
 		packet.msgType = msgType
 		l--
 		switch msgType {
 		case messageTypeRequest, messageTypeResponse:
 			if l != 3 {
-				return skipAndError(l, errors.New("invalid packet, expected array with 4 elements for request or response"))
+				return skipAndError(l, &invalidRPCMessageError{msg: "invalid packet, expected array with 4 elements for request or response"})
 			}
 		case messageTypeNotification:
 			if l != 2 {
-				return skipAndError(l, errors.New("invalid packet, expected array with 3 elements for notification"))
+				return skipAndError(l, &invalidRPCMessageError{msg: "invalid packet, expected array with 3 elements for notification"})
 			}
 		default:
-			return skipAndError(l, errors.New("invalid packet, expected request, response or notification"))
+			return skipAndError(l, &invalidRPCMessageError{msg: "invalid packet, expected request, response or notification"})
 		}
 	}
 
@@ -188,7 +204,7 @@ func (c *Connection) decodeRpcPacket(in *msgpack.Decoder) (rpcPacket, error) {
 	switch packet.msgType {
 	case messageTypeRequest, messageTypeResponse:
 		if id, err := in.DecodeUint(); err != nil {
-			return skipAndError(l, fmt.Errorf("invalid packet, expected uint for message ID: %w", err))
+			return skipAndError(l, &invalidRPCMessageError{msg: "invalid packet, expected uint for message ID", cause: err})
 		} else {
 			packet.msgID = MessageID(id)
 			l--
@@ -198,7 +214,7 @@ func (c *Connection) decodeRpcPacket(in *msgpack.Decoder) (rpcPacket, error) {
 	switch packet.msgType {
 	case messageTypeRequest, messageTypeNotification:
 		if method, err := in.DecodeString(); err != nil {
-			return skipAndError(l, fmt.Errorf("invalid packet, expected string for method name: %w", err))
+			return skipAndError(l, &invalidRPCMessageError{msg: "invalid packet, expected string for method name", cause: err})
 		} else {
 			packet.method = method
 			l--
@@ -206,11 +222,11 @@ func (c *Connection) decodeRpcPacket(in *msgpack.Decoder) (rpcPacket, error) {
 
 		paramLen, err := in.DecodeArrayLen()
 		if err != nil {
-			return skipAndError(l, fmt.Errorf("invalid packet, expected array for params: %w", err))
+			return skipAndError(l, &invalidRPCMessageError{msg: "invalid packet, expected array for params", cause: err})
 		}
 		l--
 		if paramLen < 0 {
-			return skipAndError(l, fmt.Errorf("invalid packet, error decoding params: expected array, got Nil"))
+			return skipAndError(l, &invalidRPCMessageError{msg: "invalid packet, error decoding params: expected array, got Nil"})
 		}
 
 		// Now remains only the params to decode, which is an array of length paramLen
@@ -269,7 +285,14 @@ func (c *Connection) Run() {
 		packet, err := c.decodeRpcPacket(in)
 		if err != nil {
 			c.errorHandler(fmt.Errorf("decoding packet: %w", err))
-			continue
+			var invalidRpcMessage *invalidRPCMessageError
+			if errors.As(err, &invalidRpcMessage) {
+				// Skip the invalid packet and continue processing the next one
+				continue
+			} else {
+				// Stop processing on other errors
+				return
+			}
 		}
 		elapsed := time.Since(start)
 		c.logger.LogIncomingDataDelay(elapsed)

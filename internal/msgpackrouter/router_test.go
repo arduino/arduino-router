@@ -20,6 +20,7 @@ import (
 	"github.com/djherbis/buffer"
 	"github.com/djherbis/nio/v3"
 	"github.com/stretchr/testify/require"
+	"github.com/vmihailenco/msgpack/v5"
 )
 
 type FullPipe struct {
