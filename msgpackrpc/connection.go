@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/vmihailenco/msgpack/v5"
+	"github.com/vmihailenco/msgpack/v5/msgpcode"
 )
 
 type MessageID uint
@@ -171,21 +172,27 @@ func (c *Connection) decodeRpcPacket(in *msgpack.Decoder) (rpcPacket, error) {
 		return rpcPacket{}, err
 	}
 
-	l, err := in.DecodeArrayLen()
-	if err != nil {
-		return skipAndError(1, &invalidRPCMessageError{msg: "invalid packet, expected array", cause: err})
+	if t, err := in.PeekCode(); err != nil {
+		return rpcPacket{}, fmt.Errorf("can't read message: %w", err)
+	} else if !msgpcode.IsFixedArray(t) && t != msgpcode.Array16 && t != msgpcode.Array32 {
+		return skipAndError(1, &invalidRPCMessageError{msg: "invalid packet, expected array"})
 	}
-
+	l, _ := in.DecodeArrayLen()
 	if l < 3 || l > 4 {
 		return skipAndError(l, &invalidRPCMessageError{msg: "invalid packet, expected array with 3 or 4 elements"})
 	}
 
+	maybeMsgType, err := in.DecodeInterface()
+	if err != nil {
+		return rpcPacket{}, fmt.Errorf("can't read message type: %w", err)
+	}
+	l--
+
 	var packet rpcPacket
-	if msgType, err := in.DecodeInt(); err != nil {
+	if msgType, ok := ToInt(maybeMsgType); !ok {
 		return skipAndError(l, &invalidRPCMessageError{msg: "invalid packet, expected int for message type", cause: err})
 	} else {
 		packet.msgType = msgType
-		l--
 		switch msgType {
 		case messageTypeRequest, messageTypeResponse:
 			if l != 3 {
@@ -203,31 +210,37 @@ func (c *Connection) decodeRpcPacket(in *msgpack.Decoder) (rpcPacket, error) {
 	// Decode the message ID for requests and responses
 	switch packet.msgType {
 	case messageTypeRequest, messageTypeResponse:
-		if id, err := in.DecodeUint(); err != nil {
+		maybeId, err := in.DecodeInterface()
+		if err != nil {
+			return rpcPacket{}, fmt.Errorf("can't read message ID: %w", err)
+		}
+		l--
+		if id, ok := ToUint(maybeId); !ok {
 			return skipAndError(l, &invalidRPCMessageError{msg: "invalid packet, expected uint for message ID", cause: err})
 		} else {
 			packet.msgID = MessageID(id)
-			l--
 		}
 	}
 
 	switch packet.msgType {
 	case messageTypeRequest, messageTypeNotification:
-		if method, err := in.DecodeString(); err != nil {
+		maybeMethod, err := in.DecodeInterface()
+		if err != nil {
+			return rpcPacket{}, fmt.Errorf("can't read method name: %w", err)
+		}
+		l--
+		if method, ok := maybeMethod.(string); !ok {
 			return skipAndError(l, &invalidRPCMessageError{msg: "invalid packet, expected string for method name", cause: err})
 		} else {
 			packet.method = method
-			l--
 		}
 
-		paramLen, err := in.DecodeArrayLen()
-		if err != nil {
-			return skipAndError(l, &invalidRPCMessageError{msg: "invalid packet, expected array for params", cause: err})
+		if t, err := in.PeekCode(); err != nil {
+			return rpcPacket{}, fmt.Errorf("can't read message: %w", err)
+		} else if !msgpcode.IsFixedArray(t) && t != msgpcode.Array16 && t != msgpcode.Array32 {
+			return skipAndError(1, &invalidRPCMessageError{msg: "invalid packet, expected array for parameters"})
 		}
-		l--
-		if paramLen < 0 {
-			return skipAndError(l, &invalidRPCMessageError{msg: "invalid packet, error decoding params: expected array, got Nil"})
-		}
+		paramLen, _ := in.DecodeArrayLen()
 
 		// Now remains only the params to decode, which is an array of length paramLen
 
@@ -241,7 +254,7 @@ func (c *Connection) decodeRpcPacket(in *msgpack.Decoder) (rpcPacket, error) {
 				p, err = in.DecodeInterface()
 			}
 			if err != nil {
-				return skipAndError(toSkip, fmt.Errorf("invalid packet, error decoding param %d: %w", i, err))
+				return rpcPacket{}, fmt.Errorf("error decoding param %d: %w", i, err)
 			}
 			packet.params[i] = p
 			toSkip--
@@ -250,25 +263,23 @@ func (c *Connection) decodeRpcPacket(in *msgpack.Decoder) (rpcPacket, error) {
 	case messageTypeResponse:
 		if c.paramsAndResponsesAsRaw {
 			if e, err := in.DecodeRaw(); err != nil {
-				return skipAndError(l, fmt.Errorf("invalid packet, error decoding response: %w", err))
+				return rpcPacket{}, fmt.Errorf("error decoding error: %w", err)
 			} else {
 				packet.reqError = e
-				l--
 			}
 			if r, err := in.DecodeRaw(); err != nil {
-				return skipAndError(l, fmt.Errorf("invalid packet, error decoding response: %w", err))
+				return rpcPacket{}, fmt.Errorf("error decoding result: %w", err)
 			} else {
 				packet.reqResult = r
 			}
 		} else {
 			if e, err := in.DecodeInterface(); err != nil {
-				return skipAndError(l, fmt.Errorf("invalid packet, error decoding response: %w", err))
+				return rpcPacket{}, fmt.Errorf("error decoding error: %w", err)
 			} else {
 				packet.reqError = e
-				l--
 			}
 			if r, err := in.DecodeInterface(); err != nil {
-				return skipAndError(l, fmt.Errorf("invalid packet, error decoding response: %w", err))
+				return rpcPacket{}, fmt.Errorf("error decoding result: %w", err)
 			} else {
 				packet.reqResult = r
 			}

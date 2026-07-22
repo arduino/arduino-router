@@ -90,7 +90,17 @@ func TestDecodeRpcPacketInvalid(t *testing.T) {
 	}{
 		{
 			name:        "top-level is not array",
-			data:        encodeStream(t, 123, []any{messageTypeNotification, "ok", []any{}}),
+			data:        encodeStream(t, 123),
+			errContains: "invalid packet, expected array",
+		},
+		{
+			name:        "top-level is not array/2",
+			data:        encodeStream(t, "not an array"),
+			errContains: "invalid packet, expected array",
+		},
+		{
+			name:        "top-level is not array/3",
+			data:        encodeStream(t, map[string]any{"key": "value"}),
 			errContains: "invalid packet, expected array",
 		},
 		{
@@ -106,6 +116,16 @@ func TestDecodeRpcPacketInvalid(t *testing.T) {
 		{
 			name:        "message type is not int",
 			data:        encodeStream(t, []any{"x", 1, "m", []any{}}),
+			errContains: "expected int for message type",
+		},
+		{
+			name:        "message type is not int/2",
+			data:        encodeStream(t, []any{"asdasd", 1, "m", []any{}}),
+			errContains: "expected int for message type",
+		},
+		{
+			name:        "message type is not int/3",
+			data:        encodeStream(t, []any{[]any{"asdasd", 1, 2, []any{4, 5, 6}}, 1, "m", []any{}}),
 			errContains: "expected int for message type",
 		},
 		{
@@ -134,36 +154,41 @@ func TestDecodeRpcPacketInvalid(t *testing.T) {
 			errContains: "expected string for method name",
 		},
 		{
+			name:        "method is not string/2",
+			data:        encodeStream(t, []any{messageTypeRequest, 1, []any{"asdasd", 1}, []any{}}),
+			errContains: "expected string for method name",
+		},
+		{
 			name:        "params is not array",
 			data:        encodeStream(t, []any{messageTypeRequest, 1, "m", "bad"}),
-			errContains: "expected array for params",
+			errContains: "expected array for parameters",
 		},
 		{
 			name:        "params is nil",
 			data:        encodeStream(t, []any{messageTypeRequest, 1, "m", nil}),
-			errContains: "expected array, got Nil",
+			errContains: "expected array for parameters",
 		},
 		{
-			name:        "response decode error on first field non-raw",
+			name:        "response decode error field non-raw",
 			data:        []byte{0x94, 0x01, 0x01, 0xc1, 0xc0},
-			errContains: "error decoding response",
+			errContains: "error decoding error",
 		},
 		{
-			name:        "response decode error on second field non-raw",
+			name:        "response decode result field non-raw",
 			data:        []byte{0x94, 0x01, 0x01, 0xc0, 0xc1},
-			errContains: "error decoding response",
+			errContains: "error decoding result",
 		},
 		{
-			name:        "response decode error on first field raw",
+			name:        "response decode error field raw",
 			data:        []byte{0x94, 0x01, 0x01, 0xc1, 0xc0},
 			keepAsRaw:   true,
-			errContains: "error decoding response",
+			errContains: "error decoding error",
 		},
 		{
-			name:        "response decode error on second field raw",
+			name:        "response decode result field raw",
 			data:        []byte{0x94, 0x01, 0x01, 0xc0, 0xc1},
 			keepAsRaw:   true,
-			errContains: "error decoding response",
+			errContains: "error decoding result",
 		},
 		{
 			name:        "param decode error",
@@ -182,9 +207,29 @@ func TestDecodeRpcPacketInvalid(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			c := &Connection{}
 			c.SetKeepParamsAndResponsesAsRaw(tc.keepAsRaw)
-			_, err := decodePacketFromBytes(c, tc.data)
+			var data []byte
+			data = append(data, tc.data...)
+			data = append(data, encodeStream(t, []any{messageTypeNotification, "ok", []any{}})...)
+			d := msgpack.NewDecoder(bytes.NewReader(data))
+
+			_, err := c.decodeRpcPacket(d)
 			require.Error(t, err)
 			require.ErrorContains(t, err, tc.errContains)
+
+			// See if we can recover from bad packet
+			var r rpcPacket
+			for range 10 {
+				r, err = c.decodeRpcPacket(d)
+				if err == nil {
+					break
+				}
+			}
+			require.NoError(t, err)
+			require.Equal(t, rpcPacket{
+				msgType: messageTypeNotification,
+				method:  "ok",
+				params:  []any{},
+			}, r)
 		})
 	}
 }
