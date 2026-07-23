@@ -14,8 +14,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vmihailenco/msgpack/v5"
-
 	"github.com/arduino/arduino-router/internal/msgpackrouter"
 	"github.com/arduino/arduino-router/msgpackrpc"
 
