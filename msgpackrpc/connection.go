@@ -314,12 +314,14 @@ func (c *Connection) send(data ...any) error {
 		if c.msgpBuffer == nil {
 			// Unlimited buffer size, write directly to the out stream without buffering
 			c.msgpEncoder.Reset(c.out)
+			c.msgpEncoder.UseCompactInts(true)
 			return c.msgpEncoder.Encode(data)
 		}
 
 		// Limited buffer size, write to the buffer first and then flush it to the out stream
 		c.msgpBuffer.Reset()
 		c.msgpEncoder.Reset(c.msgpBuffer)
+		c.msgpEncoder.UseCompactInts(true)
 		if err := c.msgpEncoder.Encode(data); err != nil {
 			return err
 		}

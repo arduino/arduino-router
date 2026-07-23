@@ -6,6 +6,7 @@
 package msgpackrpc
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -176,4 +177,46 @@ func TestRPCMessageMaxSize(t *testing.T) {
 	err = conn.SendNotification("test", "123456789") // This message should exceed the limit
 	require.ErrorIs(t, err, &ErrBufferLimitExceeded{})
 	time.Sleep(500 * time.Millisecond)
+}
+
+func expectReadHex(t *testing.T, r io.Reader, hexStr string) {
+	expected, err := hex.DecodeString(hexStr)
+	require.NoError(t, err)
+	resp := make([]byte, len(expected)*2)
+	n, err := r.Read(resp)
+	require.NoError(t, err)
+	require.Equal(t, expected, resp[:n])
+}
+
+func TestFixIntHandling(t *testing.T) {
+	in, _ := nio.Pipe(buffer.New(1024))
+	testdataOut, out := nio.Pipe(buffer.New(1024))
+
+	conn := NewConnection(in, out, nil, nil, nil)
+	go conn.Run()
+	t.Cleanup(conn.Close)
+
+	{
+		// Send a notification and check that the integer is
+		// encoded using the smallest integer representation
+		require.NoError(t, conn.SendNotification("a", 10))
+		expectReadHex(t, testdataOut, "9302a161910a") // [2, "a", [10]]
+		require.NoError(t, conn.SendNotification("a", int8(10)))
+		expectReadHex(t, testdataOut, "9302a161910a") // [2, "a", [10]]
+		require.NoError(t, conn.SendNotification("a", int16(10)))
+		expectReadHex(t, testdataOut, "9302a161910a") // [2, "a", [10]]
+		require.NoError(t, conn.SendNotification("a", int32(10)))
+		expectReadHex(t, testdataOut, "9302a161910a") // [2, "a", [10]]
+		require.NoError(t, conn.SendNotification("a", int64(10)))
+		expectReadHex(t, testdataOut, "9302a161910a") // [2, "a", [10]]
+
+		require.NoError(t, conn.SendNotification("b", uint8(10)))
+		expectReadHex(t, testdataOut, "9302a162910a") // [2, "b", [10]]
+		require.NoError(t, conn.SendNotification("b", uint16(10)))
+		expectReadHex(t, testdataOut, "9302a162910a") // [2, "b", [10]]
+		require.NoError(t, conn.SendNotification("b", uint32(10)))
+		expectReadHex(t, testdataOut, "9302a162910a") // [2, "b", [10]]
+		require.NoError(t, conn.SendNotification("b", uint64(10)))
+		expectReadHex(t, testdataOut, "9302a162910a") // [2, "b", [10]]
+	}
 }
