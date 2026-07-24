@@ -26,37 +26,44 @@ func TestRPCConnection(t *testing.T) {
 	d := msgpack.NewDecoder(testdataOut)
 	d.UseLooseInterfaceDecoding(true)
 
-	var wg sync.WaitGroup
-	notification := ""
-	request := ""
-	requestError := ""
+	expNotifications := []string{
+		"NOT method=initialized params=[123]",
+	}
+	expRequests := []string{
+		"REQ method=textDocument/didOpen params=[]",
+		"REQ method=textDocument/didClose params=[]",
+	}
+	expErrors := []string{
+		"error=invalid ID in request response '999': double answer or request not sent",
+	}
+
+	var recvLock sync.Mutex
+	recvNotifications := []string{}
+	recvRequests := []string{}
+	recvErrors := []string{}
 	conn := NewConnection(
 		in, out,
 		func(logger FunctionLogger, method string, params []any, res ResponseSender) {
-			go func() {
-				defer wg.Done()
-				request = fmt.Sprintf("REQ method=%v params=%v", method, params)
-				_ = res([]any{}, nil)
-			}()
+			recvLock.Lock()
+			defer recvLock.Unlock()
+			recvRequests = append(recvRequests, fmt.Sprintf("REQ method=%v params=%v", method, params))
+			_ = res([]any{}, nil)
 		},
 		func(logger FunctionLogger, method string, params []any) {
-			go func() {
-				defer wg.Done()
-				notification = fmt.Sprintf("NOT method=%v params=%v", method, params)
-			}()
+			recvLock.Lock()
+			defer recvLock.Unlock()
+			recvNotifications = append(recvNotifications, fmt.Sprintf("NOT method=%v params=%v", method, params))
 		},
 		func(e error) {
-			defer wg.Done()
-			if e == io.EOF {
+			recvLock.Lock()
+			defer recvLock.Unlock()
+			if errors.Is(e, io.EOF) || errors.Is(e, io.ErrClosedPipe) {
 				return
 			}
-			requestError = fmt.Sprintf("error=%s", e)
+			recvErrors = append(recvErrors, fmt.Sprintf("error=%v", e))
 		},
 	)
-	t.Cleanup(func() {
-		wg.Add(1) // this will produce an error in the callback handler
-		conn.Close()
-	})
+	t.Cleanup(conn.Close)
 	go conn.Run()
 
 	enc := msgpack.NewEncoder(testdataIn)
@@ -66,41 +73,31 @@ func TestRPCConnection(t *testing.T) {
 	}
 
 	{ // Test incoming notification
-		wg.Add(1)
 		send(messageTypeNotification, "initialized", []any{123})
-		wg.Wait()
-		require.Equal(t, "NOT method=initialized params=[123]", notification)
 	}
 
 	{ // Test incoming request
-		wg.Add(1)
 		send(messageTypeRequest, MessageID(1), "textDocument/didOpen", []any{})
-		wg.Wait()
-		require.Equal(t, "REQ method=textDocument/didOpen params=[]", request)
 		msg, err := d.DecodeSlice()
 		require.NoError(t, err)
 		require.Equal(t, []any{int64(1), int64(1), nil, []any{}}, msg)
 	}
 
 	{ // Test another incoming request
-		wg.Add(1)
 		send(messageTypeRequest, MessageID(2), "textDocument/didClose", []any{})
-		wg.Wait()
-		require.Equal(t, "REQ method=textDocument/didClose params=[]", request)
 		msg, err := d.DecodeSlice()
 		require.NoError(t, err)
 		require.Equal(t, []any{int64(1), int64(2), nil, []any{}}, msg)
 	}
 
 	{ // Test outgoing request
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		var wg sync.WaitGroup
+		wg.Go(func() {
 			respRes, respErr, err := conn.SendRequest(t.Context(), "helloworld", true)
 			require.NoError(t, err)
 			require.Nil(t, respErr)
 			require.Equal(t, map[string]any{"fakedata": int8(99)}, respRes)
-		}()
+		})
 		msg, err := d.DecodeSlice() // Grab the SendRequest
 		require.NoError(t, err)
 		require.Equal(t, []any{int64(0), int64(1), "helloworld", []any{true}}, msg)
@@ -109,11 +106,18 @@ func TestRPCConnection(t *testing.T) {
 	}
 
 	{ // Test invalid response
-		wg.Add(1)
 		send(1, 999, 10, nil)
-		wg.Wait()
-		require.Equal(t, "error=invalid ID in request response '999': double answer or request not sent", requestError)
 	}
+
+	// Let a bit of time pass to allow the connection to process all messages
+	time.Sleep(100 * time.Millisecond)
+
+	// Check that all expected notifications, requests, and errors have been handled
+	recvLock.Lock()
+	defer recvLock.Unlock()
+	require.Equal(t, expNotifications, recvNotifications)
+	require.Equal(t, expRequests, recvRequests)
+	require.Equal(t, expErrors, recvErrors)
 }
 
 func TestRPCMessageMaxSize(t *testing.T) {
@@ -219,4 +223,64 @@ func TestFixIntHandling(t *testing.T) {
 		require.NoError(t, conn.SendNotification("b", uint64(10)))
 		expectReadHex(t, testdataOut, "9302a162910a") // [2, "b", [10]]
 	}
+}
+func TestRPCConnectionRecover(t *testing.T) {
+	in, testdataIn := nio.Pipe(buffer.New(1024))
+	testdataOut, out := nio.Pipe(buffer.New(1024))
+
+	enc := msgpack.NewEncoder(testdataIn)
+	enc.UseCompactInts(true)
+	send := func(msg ...any) {
+		require.NoError(t, enc.Encode(msg))
+	}
+
+	d := msgpack.NewDecoder(testdataOut)
+	d.UseLooseInterfaceDecoding(true)
+
+	conn := NewConnection(
+		in, out,
+		func(logger FunctionLogger, method string, params []any, res ResponseSender) {
+			// Return a big response
+			require.NoError(t, res("123", nil))
+		},
+		func(logger FunctionLogger, method string, params []any) {
+			// Should receive only small notifications
+			require.Equal(t, "hi", params[0].(string))
+		},
+		func(e error) {
+			fmt.Println("ERROR HANDLER CALLED:", e)
+		},
+	)
+
+	// Start the connection loop
+	go conn.Run()
+	t.Cleanup(conn.Close)
+
+	// Send a valid request and check the response
+	send(messageTypeRequest, MessageID(1), "test", []any{})
+	var resp any
+	require.NoError(t, d.Decode(&resp))
+	require.Equal(t, []any{int64(1), int64(1), nil, "123"}, resp)
+
+	// Send an invalid message to trigger an error
+	send(1, 2, 3) // Invalid message format
+
+	// Send another valid request and check the response
+	send(messageTypeRequest, MessageID(2), "test", []any{})
+	var resp2 any
+	require.NoError(t, d.Decode(&resp2))
+	require.Equal(t, []any{int64(1), int64(2), nil, "123"}, resp2)
+
+	// Send a truncated message followed by a sequence to drain the incomplete message
+	call := []byte{0x94, 0x00, 0x03, 0xA4, 0x74, 0x65, 0x73, 0x74, 0x90} // Encoding of [0, 3, "test", []]
+	_, err := testdataIn.Write(call[:5])                                 // Send incomplete RPC message
+	require.NoError(t, err)
+	_, err = testdataIn.Write([]byte{0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0}) // Send a sequence of NIL to drain the incomplete message
+	require.NoError(t, err)
+
+	// Send another valid request and check the response
+	send(messageTypeRequest, MessageID(3), "test", []any{})
+	var resp3 any
+	require.NoError(t, d.Decode(&resp3))
+	require.Equal(t, []any{int64(1), int64(3), nil, "123"}, resp3)
 }
