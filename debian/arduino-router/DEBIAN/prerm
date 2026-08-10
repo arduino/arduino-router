@@ -1,6 +1,6 @@
 #!/bin/sh
 
 systemctl disable arduino-router.service
-systemctl disable arduino-router-serial.service
 systemctl disable arduino-router-serial.path
+systemctl disable arduino-router-serial.service
 
