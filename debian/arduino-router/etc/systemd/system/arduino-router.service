@@ -5,7 +5,7 @@ Wants=network.target
 Requires=
 
 [Service]
-ExecStart=/usr/bin/arduino-router --unix-port /var/run/arduino-router.sock
+ExecStart=/usr/bin/arduino-router --unix-port /var/run/arduino-router.sock --unix-sock-uid arduino
 StandardOutput=journal
 StandardError=journal
 Restart=always

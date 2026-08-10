@@ -15,6 +15,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
 	"sync"
 	"syscall"
@@ -42,6 +43,7 @@ type Config struct {
 	LogLevel          slog.Level
 	ListenTCPAddr     string
 	ListenUnixAddr    string
+	ListenUnixUID     string
 	AfterReadyCommand string
 	SerialPortAddr    string
 	SerialBaudRate    int
@@ -135,17 +137,32 @@ func startRouter(ctx context.Context, cfg Config) error {
 	}
 
 	// Open listening UNIX socket
-	if cfg.ListenUnixAddr != "" {
-		_ = os.Remove(cfg.ListenUnixAddr) // Remove the socket file if it exists
-		if l, err := net.Listen("unix", cfg.ListenUnixAddr); err != nil {
-			return fmt.Errorf("failed to listen on UNIX socket %s: %w", cfg.ListenUnixAddr, err)
+	if unixAddr := cfg.ListenUnixAddr; unixAddr != "" {
+		_ = os.Remove(unixAddr) // Remove the socket file if it exists
+
+		// Ensure the directory exists
+		if err := os.MkdirAll(filepath.Dir(unixAddr), 0755); err != nil {
+			return fmt.Errorf("failed to create directory for UNIX socket %s: %w", unixAddr, err)
+		}
+		if l, err := net.Listen("unix", unixAddr); err != nil {
+			return fmt.Errorf("failed to listen on UNIX socket %s: %w", unixAddr, err)
 		} else {
-			slog.Info("Listening on Unix socket", "listen_addr", cfg.ListenUnixAddr)
+			slog.Info("Listening on Unix socket", "listen_addr", unixAddr)
 			listeners = append(listeners, l)
 		}
 
-		// Allow `arduino` user to write to a socket file owned by `root`
-		if err := os.Chmod(cfg.ListenUnixAddr, 0666); err != nil {
+		// Allow only the owner to read/write the socket file
+		if cfg.ListenUnixUID != "" {
+			// The UID may also be a username, so we need to resolve it to a UID
+			uid, err := resolveUID(cfg.ListenUnixUID)
+			if err != nil {
+				return fmt.Errorf("failed to resolve UID %s: %w", cfg.ListenUnixUID, err)
+			}
+			if err := os.Chown(unixAddr, uid, -1); err != nil {
+				return fmt.Errorf("failed to change owner of UNIX socket %s: %w", unixAddr, err)
+			}
+		}
+		if err := os.Chmod(unixAddr, 0600); err != nil {
 			return err
 		}
 	}
@@ -318,6 +335,18 @@ func startRouter(ctx context.Context, cfg Config) error {
 	}
 
 	return nil
+}
+
+// resolveUID resolves a string that may be either a numeric UID or a username into a UID.
+func resolveUID(uidOrName string) (int, error) {
+	if uid, err := strconv.Atoi(uidOrName); err == nil {
+		return uid, nil
+	}
+	u, err := user.Lookup(uidOrName)
+	if err != nil {
+		return 0, err
+	}
+	return strconv.Atoi(u.Uid)
 }
 
 func waitForPort(ctx context.Context, waitPort string) error {
