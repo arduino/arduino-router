@@ -6,7 +6,6 @@
 package main
 
 import (
-	"cmp"
 	"context"
 	"encoding/hex"
 	"fmt"
@@ -17,6 +16,8 @@ import (
 	"os/signal"
 	"os/user"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -42,7 +43,7 @@ var Version string = "0.0.0-dev"
 type Config struct {
 	LogLevel          slog.Level
 	ListenTCPAddr     string
-	ListenUnixAddr    string
+	ListenUnixAddr    []string
 	ListenUnixUID     string
 	AfterReadyCommand string
 	SerialPortAddr    string
@@ -63,7 +64,9 @@ func main() {
 				cfg.LogLevel = slog.LevelInfo
 			}
 			if !cmd.Flags().Changed("unix-port") {
-				cfg.ListenUnixAddr = cmp.Or(os.Getenv("ARDUINO_ROUTER_SOCKET"), cfg.ListenUnixAddr)
+				if envAddr := os.Getenv("ARDUINO_ROUTER_SOCKET"); envAddr != "" {
+					cfg.ListenUnixAddr = strings.Split(envAddr, ",")
+				}
 			}
 			if err := startRouter(cmd.Context(), cfg); err != nil {
 				slog.Error("Failed to start router", "err", err)
@@ -73,7 +76,8 @@ func main() {
 	}
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose logging")
 	cmd.Flags().StringVarP(&cfg.ListenTCPAddr, "listen-port", "l", "", "Listening port for RPC services")
-	cmd.Flags().StringVarP(&cfg.ListenUnixAddr, "unix-port", "u", "/var/run/arduino-router.sock", "Listening port for RPC services")
+	cmd.Flags().StringSliceVarP(&cfg.ListenUnixAddr, "unix-port", "u", []string{"/var/run/arduino-router.sock"}, "Listening port for RPC services")
+	cmd.Flags().StringVarP(&cfg.ListenUnixUID, "unix-sock-uid", "", "", "UID for the UNIX socket file")
 	cmd.Flags().StringVar(&cfg.AfterReadyCommand, "after-ready", "", "Execute a command after the router is ready)")
 	cmd.Flags().StringVarP(&cfg.SerialPortAddr, "serial-port", "p", "", "Serial port address")
 	cmd.Flags().IntVarP(&cfg.SerialBaudRate, "serial-baudrate", "b", 115200, "Serial port baud rate")
@@ -136,8 +140,8 @@ func startRouter(ctx context.Context, cfg Config) error {
 		}
 	}
 
-	// Open listening UNIX socket
-	if unixAddr := cfg.ListenUnixAddr; unixAddr != "" {
+	// Open listening UNIX sockets
+	for _, unixAddr := range cfg.ListenUnixAddr {
 		_ = os.Remove(unixAddr) // Remove the socket file if it exists
 
 		// Ensure the directory exists
