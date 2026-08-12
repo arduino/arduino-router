@@ -5,5 +5,5 @@ if [ -d /run/systemd/system ]; then
 fi
 
 if [ "$1" = "purge" ]; then
-  delgroup --system arduino-router || true
+  delgroup --system arduino-router > /dev/null || true
 fi
