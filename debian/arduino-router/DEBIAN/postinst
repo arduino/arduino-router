@@ -1,6 +1,6 @@
 #!/bin/sh
 
-addgroup --system arduino-router
+addgroup --system arduino-router > /dev/null || true
 
 systemctl enable arduino-router.service
 systemctl enable arduino-router-serial.service
