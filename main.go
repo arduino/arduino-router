@@ -15,7 +15,9 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"os/user"
 	"path/filepath"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -144,9 +146,16 @@ func startRouter(ctx context.Context, cfg Config) error {
 			listeners = append(listeners, l)
 		}
 
-		// Allow `arduino` user to write to a socket file owned by `root`
-		if err := os.Chmod(cfg.ListenUnixAddr, 0666); err != nil {
+		// Allow members of the `arduino-router` group to access a socket file owned by `root`
+		if err := os.Chmod(cfg.ListenUnixAddr, 0660); err != nil {
 			return err
+		}
+		if grp, err := user.LookupGroup("arduino-router"); err != nil {
+			slog.Warn("Group arduino-router not found, unix socket group ownership not changed", "err", err)
+		} else if gid, err := strconv.Atoi(grp.Gid); err != nil {
+			return fmt.Errorf("invalid gid for group arduino-router: %w", err)
+		} else if err := os.Chown(cfg.ListenUnixAddr, -1, gid); err != nil {
+			return fmt.Errorf("failed to change group of unix socket %s: %w", cfg.ListenUnixAddr, err)
 		}
 	}
 

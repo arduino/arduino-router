@@ -3,3 +3,7 @@
 if [ -d /run/systemd/system ]; then
   systemctl daemon-reload
 fi
+
+if [ "$1" = "purge" ]; then
+  delgroup --system arduino-router > /dev/null || true
+fi
