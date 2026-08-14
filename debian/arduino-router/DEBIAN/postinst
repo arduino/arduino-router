@@ -2,7 +2,11 @@
 
 addgroup --system arduino-router > /dev/null || true
 
+printf '%s\n' \
+  'To use arduino-router-cli, add your user to the arduino-router group:' \
+  '  sudo usermod -aG arduino-router <username>' \
+  'Then log out and back in for the new group membership to take effect.'
+
 systemctl enable arduino-router.service
 systemctl enable arduino-router-serial.service
 systemctl enable arduino-router-serial.path
-
