@@ -14,10 +14,10 @@ This module provides also a MessagePack RPC client in the `msgpackrpc` package. 
 
 The Router implements a single `$/register` method that is used by a client to register the RPC calls it wants to expose. A single string parameter is required in the call: the method name to register.
 
-| Client P <-> Router                                                 |
-| ------------------------------------------------------------------- |
-| `[REQUEST, 50, "$/register", ["ping"]]` >>                          |
-| Method successfully registered:<br> `[RESPONSE, 50, null, true]` << |
+| Client P <-> Router                                                     |
+| ----------------------------------------------------------------------- |
+| `[REQUEST, 50, "$/register", ["ping"]]` >>                              |
+| Method successfully registered:<br> `[RESPONSE, 50, null, true]` <<     |
 | Error:<br> `[RESPONSE, 50, [5, "route already exists: ping"], null]` << |
 
 Registering a method name that the same client has already registered succeeds again; the error is returned only when another client owns the name.
@@ -50,10 +50,10 @@ When a client disconnects all the registered methods from that client are droppe
 
 A client can drop one of its registered methods by calling the `$/unregister` method with the method name as the only parameter. Only the client that registered the method can unregister it.
 
-| Client P <-> Router                                                                 |
-| ----------------------------------------------------------------------------------- |
-| `[REQUEST, 51, "$/unregister", ["ping"]]` >>                                        |
-| Method successfully unregistered:<br> `[RESPONSE, 51, null, true]` <<               |
+| Client P <-> Router                                                                    |
+| -------------------------------------------------------------------------------------- |
+| `[REQUEST, 51, "$/unregister", ["ping"]]` >>                                           |
+| Method successfully unregistered:<br> `[RESPONSE, 51, null, true]` <<                  |
 | Error:<br> `[RESPONSE, 51, [4, "route not registered by this client: ping"], null]` << |
 
 ### `$/reset` un-registering methods
