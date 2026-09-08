@@ -262,7 +262,10 @@ func (r *Router) registerMethod(method string, conn *msgpackrpc.Connection) erro
 	r.routesLock.Lock()
 	defer r.routesLock.Unlock()
 
-	if _, ok := r.routes[method]; ok {
+	if owner, ok := r.routes[method]; ok {
+		if owner == conn {
+			return nil // Already registered by this client: nothing to do
+		}
 		return newRouteAlreadyExistsError(method)
 	}
 	r.routes[method] = conn

@@ -95,8 +95,15 @@ func TestBasicRouterFunctionality(t *testing.T) {
 		require.NoError(t, err)
 	}
 	{
-		// Try to re-register the same method
+		// Re-registering the same method from the same client is idempotent
 		result, reqErr, err := cl1.SendRequest(context.Background(), "$/register", "ping")
+		require.Equal(t, true, result)
+		require.Nil(t, reqErr)
+		require.NoError(t, err)
+	}
+	{
+		// Registering a method owned by another client fails
+		result, reqErr, err := cl2.SendRequest(context.Background(), "$/register", "ping")
 		require.Nil(t, result)
 		require.Equal(t, []any{int8(msgpackrouter.ErrCodeRouteAlreadyExists), "route already exists: ping"}, reqErr)
 		require.NoError(t, err)

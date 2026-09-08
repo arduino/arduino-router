@@ -18,7 +18,9 @@ The Router implements a single `$/register` method that is used by a client to r
 | ------------------------------------------------------------------- |
 | `[REQUEST, 50, "$/register", ["ping"]]` >>                          |
 | Method successfully registered:<br> `[RESPONSE, 50, null, true]` << |
-| Error:<br> `[RESPONSE, 50, "route already exists: ping", null]` <<  |
+| Error:<br> `[RESPONSE, 50, [5, "route already exists: ping"], null]` << |
+
+Registering a method name that the same client has already registered succeeds again; the error is returned only when another client owns the name.
 
 After the method is registered another client may perform an RPC request to that method, the Router will take care to forward the messages back and forth. A typical RPC call example may be:
 
