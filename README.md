@@ -44,6 +44,16 @@ A request to a non-registered method will result in an error:
 
 When a client disconnects all the registered methods from that client are dropped.
 
+### `$/unregister <METHOD_NAME>` un-registering a single method
+
+A client can drop one of its registered methods by calling the `$/unregister` method with the method name as the only parameter. Only the client that registered the method can unregister it.
+
+| Client P <-> Router                                                                 |
+| ----------------------------------------------------------------------------------- |
+| `[REQUEST, 51, "$/unregister", ["ping"]]` >>                                        |
+| Method successfully unregistered:<br> `[RESPONSE, 51, null, true]` <<               |
+| Error:<br> `[RESPONSE, 51, [4, "route not registered by this client: ping"], null]` << |
+
 ### `$/reset` un-registering methods
 
 A client can drop all its registered methods by calling the `$/reset` method, with an empty parameter list.

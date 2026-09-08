@@ -132,6 +132,18 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 					fwdRes(true, nil)
 				}
 				return
+			case "$/unregister":
+				// Check if the client is trying to unregister one of its methods
+				if len(params.Get()) != 1 {
+					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params.Get()))))
+				} else if methodToUnregister, ok := params.Get()[0].(string); !ok {
+					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: expected string, got %T", params.Get()[0])))
+				} else if !r.removeSingleMethodFromConnection(methodToUnregister, msgpackconn) {
+					fwdRes(nil, routerError(ErrCodeGenericError, fmt.Sprintf("route not registered by this client: %s", methodToUnregister)))
+				} else {
+					fwdRes(true, nil)
+				}
+				return
 			case "$/reset":
 				// Check if the client is trying to remove its registered methods
 				if len(params.Get()) != 0 {
@@ -255,6 +267,18 @@ func (r *Router) registerMethod(method string, conn *msgpackrpc.Connection) erro
 	}
 	r.routes[method] = conn
 	return nil
+}
+
+// removeSingleMethodFromConnection drops the route if it belongs to conn, reporting whether it did.
+func (r *Router) removeSingleMethodFromConnection(method string, conn *msgpackrpc.Connection) bool {
+	r.routesLock.Lock()
+	defer r.routesLock.Unlock()
+
+	if owner, ok := r.routes[method]; !ok || owner != conn {
+		return false
+	}
+	delete(r.routes, method)
+	return true
 }
 
 func (r *Router) removeMethodsFromConnection(conn *msgpackrpc.Connection) {

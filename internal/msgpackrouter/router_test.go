@@ -152,6 +152,75 @@ func TestBasicRouterFunctionality(t *testing.T) {
 	cl1NotificationsMux.Unlock()
 }
 
+func TestUnregisterMethod(t *testing.T) {
+	ch1a, ch1b := newFullPipe()
+	ch2a, ch2b := newFullPipe()
+
+	echo := func(logger msgpackrpc.FunctionLogger, method string, params []any, res msgpackrpc.ResponseSender) {
+		_ = res(params, nil)
+	}
+	ignoreNotification := func(logger msgpackrpc.FunctionLogger, method string, params []any) {}
+	ignoreError := func(err error) {}
+	cl1 := msgpackrpc.NewConnection(ch1a, ch1a, echo, ignoreNotification, ignoreError)
+	go cl1.Run()
+	cl2 := msgpackrpc.NewConnection(ch2a, ch2a, echo, ignoreNotification, ignoreError)
+	go cl2.Run()
+
+	router := msgpackrouter.New()
+	router.Accept(ch1b)
+	router.Accept(ch2b)
+
+	{
+		// Register a method on the first client
+		result, reqErr, err := cl1.SendRequest(context.Background(), "$/register", "ping")
+		require.Equal(t, true, result)
+		require.Nil(t, reqErr)
+		require.NoError(t, err)
+	}
+	{
+		// The second client cannot unregister a method it does not own
+		result, reqErr, err := cl2.SendRequest(context.Background(), "$/unregister", "ping")
+		require.Nil(t, result)
+		require.Equal(t, []any{int8(msgpackrouter.ErrCodeGenericError), "route not registered by this client: ping"}, reqErr)
+		require.NoError(t, err)
+	}
+	{
+		// Unregistering a method that was never registered fails the same way
+		result, reqErr, err := cl1.SendRequest(context.Background(), "$/unregister", "pong")
+		require.Nil(t, result)
+		require.Equal(t, []any{int8(msgpackrouter.ErrCodeGenericError), "route not registered by this client: pong"}, reqErr)
+		require.NoError(t, err)
+	}
+	{
+		// Invalid params are rejected
+		result, reqErr, err := cl1.SendRequest(context.Background(), "$/unregister", 42)
+		require.Nil(t, result)
+		require.Equal(t, []any{int8(msgpackrouter.ErrCodeInvalidParams), "invalid params: expected string, got int8"}, reqErr)
+		require.NoError(t, err)
+	}
+	{
+		// The owner unregisters the method
+		result, reqErr, err := cl1.SendRequest(context.Background(), "$/unregister", "ping")
+		require.Equal(t, true, result)
+		require.Nil(t, reqErr)
+		require.NoError(t, err)
+	}
+	{
+		// The method is no longer routed
+		result, reqErr, err := cl2.SendRequest(context.Background(), "ping", 1)
+		require.Nil(t, result)
+		require.Equal(t, []any{int8(msgpackrouter.ErrCodeMethodNotAvailable), "method ping not available"}, reqErr)
+		require.NoError(t, err)
+	}
+	{
+		// The name is free for another client
+		result, reqErr, err := cl2.SendRequest(context.Background(), "$/register", "ping")
+		require.Equal(t, true, result)
+		require.Nil(t, reqErr)
+		require.NoError(t, err)
+	}
+}
+
 func TestMessageForwarderCongestionControl(t *testing.T) {
 	// Test parameters
 	msgLatency := 100 * time.Millisecond
