@@ -19,30 +19,32 @@ import (
 
 	"github.com/arduino/arduino-router/internal/msgpackrouter"
 	"github.com/arduino/arduino-router/msgpackrpc"
+
+	"go.bug.st/f"
 )
 
 // Register the Network API methods
 func Register(router *msgpackrouter.Router) {
-	_ = router.RegisterMethod("tcp/connect", tcpConnect)
+	f.NoError(router.RegisterMethod("tcp/connect", tcpConnect))
 
-	_ = router.RegisterMethod("tcp/listen", tcpListen)
-	_ = router.RegisterMethod("tcp/closeListener", tcpCloseListener)
+	f.NoError(router.RegisterMethod("tcp/listen", tcpListen))
+	f.NoError(router.RegisterMethod("tcp/closeListener", tcpCloseListener))
 
-	_ = router.RegisterMethod("tcp/accept", tcpAccept)
-	_ = router.RegisterMethod("tcp/read", tcpRead)
-	_ = router.RegisterMethod("tcp/write", tcpWrite)
-	_ = router.RegisterMethod("tcp/close", tcpClose)
+	f.NoError(router.RegisterMethod("tcp/accept", tcpAccept))
+	f.NoError(router.RegisterMethod("tcp/read", tcpRead))
+	f.NoError(router.RegisterMethod("tcp/write", tcpWrite))
+	f.NoError(router.RegisterMethod("tcp/close", tcpClose))
 
-	_ = router.RegisterMethod("tcp/connectSSL", tcpConnectSSL)
+	f.NoError(router.RegisterMethod("tcp/connectSSL", tcpConnectSSL))
 
-	_ = router.RegisterMethod("udp/connect", udpConnect)
-	_ = router.RegisterMethod("udp/beginPacket", udpBeginPacket)
-	_ = router.RegisterMethod("udp/write", udpWrite)
-	_ = router.RegisterMethod("udp/endPacket", udpEndPacket)
-	_ = router.RegisterMethod("udp/awaitPacket", udpAwaitPacket)
-	_ = router.RegisterMethod("udp/read", udpRead)
-	_ = router.RegisterMethod("udp/dropPacket", udpDropPacket)
-	_ = router.RegisterMethod("udp/close", udpClose)
+	f.NoError(router.RegisterMethod("udp/connect", udpConnect))
+	f.NoError(router.RegisterMethod("udp/beginPacket", udpBeginPacket))
+	f.NoError(router.RegisterMethod("udp/write", udpWrite))
+	f.NoError(router.RegisterMethod("udp/endPacket", udpEndPacket))
+	f.NoError(router.RegisterMethod("udp/awaitPacket", udpAwaitPacket))
+	f.NoError(router.RegisterMethod("udp/read", udpRead))
+	f.NoError(router.RegisterMethod("udp/dropPacket", udpDropPacket))
+	f.NoError(router.RegisterMethod("udp/close", udpClose))
 }
 
 var lock sync.RWMutex
