@@ -587,7 +587,7 @@ func udpAwaitPacket(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.
 	}
 
 	lock.Lock()
-	udpReadBuffers[id] = buffer[:n]
+	udpReadBuffers[sockId] = buffer[:n]
 	lock.Unlock()
 	res([]any{n, host, port}, nil)
 }
