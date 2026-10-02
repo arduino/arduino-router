@@ -602,7 +602,9 @@ func udpAwaitPacket(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.
 	}
 
 	lock.Lock()
-	udpReadBuffers[sockId] = buffer[:n]
+	if _, stillOpen := liveUdpConnections[sockId]; stillOpen {
+		udpReadBuffers[sockId] = buffer[:n]
+	}
 	lock.Unlock()
 	res([]any{n, host, port}, nil)
 }
