@@ -276,6 +276,45 @@ func TestUDPDropPacket(t *testing.T) {
 	})
 }
 
+func TestCleanupClosesAndRemovesUDPConnection(t *testing.T) {
+	rpc := &msgpackrpc.Connection{}
+	var connectionID uint
+	udpConnect(rpc, []any{"", 0}, func(result, err any) {
+		require.Nil(t, err)
+		connectionID = result.(uint)
+	})
+	sockID := socketID{conn: rpc, id: connectionID}
+
+	udpBeginPacket(rpc, []any{connectionID, localHost, 12345}, func(result, err any) {
+		require.Nil(t, err)
+		require.Equal(t, true, result)
+	})
+	udpWrite(rpc, []any{connectionID, "pending"}, func(result, err any) {
+		require.Nil(t, err)
+		require.Equal(t, 7, result)
+	})
+	lock.Lock()
+	udpReadBuffers[sockID] = []byte("buffered")
+	lock.Unlock()
+	lock.RLock()
+	udpConn := liveUdpConnections[sockID]
+	lock.RUnlock()
+
+	cleanup(rpc)
+	require.Error(t, udpConn.SetReadDeadline(time.Now()))
+
+	lock.RLock()
+	_, connectionExists := liveUdpConnections[sockID]
+	_, readBufferExists := udpReadBuffers[sockID]
+	_, writeBufferExists := udpWriteBuffers[sockID]
+	_, writeTargetExists := udpWriteTargets[sockID]
+	lock.RUnlock()
+	require.False(t, connectionExists)
+	require.False(t, readBufferExists)
+	require.False(t, writeBufferExists)
+	require.False(t, writeTargetExists)
+}
+
 const anyHost = "0.0.0.0"
 const localHost = "127.0.0.1"
 

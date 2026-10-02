@@ -46,6 +46,8 @@ func Register(router *msgpackrouter.Router) {
 	f.NoError(router.RegisterMethod("udp/read", udpRead))
 	f.NoError(router.RegisterMethod("udp/dropPacket", udpDropPacket))
 	f.NoError(router.RegisterMethod("udp/close", udpClose))
+
+	router.RegisterConnectionCleanupHandler(cleanup)
 }
 
 // socketID uniquely identifies a network socket by its ID and the associated rpc connection.
@@ -696,4 +698,31 @@ func udpClose(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Router
 		return
 	}
 	res("", nil)
+}
+
+func cleanup(rpc *msgpackrpc.Connection) {
+	// Perform any necessary cleanup for the live connections associated with this RPC connection
+	lock.Lock()
+	for sockId, sock := range liveConnections {
+		if sockId.conn == rpc {
+			_ = sock.Close()
+			delete(liveConnections, sockId)
+		}
+	}
+	for sockId, sock := range liveListeners {
+		if sockId.conn == rpc {
+			_ = sock.Close()
+			delete(liveListeners, sockId)
+		}
+	}
+	for sockId, sock := range liveUdpConnections {
+		if sockId.conn == rpc {
+			_ = sock.Close()
+			delete(liveUdpConnections, sockId)
+			delete(udpReadBuffers, sockId)
+			delete(udpWriteTargets, sockId)
+			delete(udpWriteBuffers, sockId)
+		}
+	}
+	lock.Unlock()
 }
