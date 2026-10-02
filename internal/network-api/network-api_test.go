@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arduino/arduino-router/internal/msgpackrouter"
 	"github.com/arduino/arduino-router/msgpackrpc"
 
 	"github.com/stretchr/testify/require"
@@ -251,6 +252,56 @@ func TestTCPNetworkAPI(t *testing.T) {
 	})
 
 	wg.Wait()
+}
+
+func TestTCPConnectSSLInvalidParameterCounts(t *testing.T) {
+	rpc := &msgpackrpc.Connection{}
+	for _, params := range [][]any{
+		{},
+		{"localhost"},
+		{"localhost", uint16(443), "", "extra"},
+	} {
+		t.Run(fmt.Sprintf("%d parameters", len(params)), func(t *testing.T) {
+			tcpConnectSSL(rpc, params, func(result, err any) {
+				require.Nil(t, result)
+				require.Equal(t, []any{1, "Invalid number of parameters, expected server address, port and optional TLS cert"}, err)
+			})
+		})
+	}
+}
+
+func TestNetworkAPIRejectsInvalidParameterCounts(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler func(*msgpackrpc.Connection, []any, msgpackrouter.RouterResponseHandler)
+		wantErr []any
+	}{
+		{"tcp/connect", tcpConnect, []any{1, "Invalid number of parameters, expected server address and port"}},
+		{"tcp/listen", tcpListen, []any{1, "Invalid number of parameters, expected listen address and port"}},
+		{"tcp/accept", tcpAccept, []any{1, "Invalid number of parameters, expected listener ID"}},
+		{"tcp/read", tcpRead, []any{1, "Invalid number of parameters, expected (connection ID, max bytes to read[, optional timeout in ms])"}},
+		{"tcp/write", tcpWrite, []any{1, "Invalid number of parameters, expected (connection ID, data to write)"}},
+		{"tcp/close", tcpClose, []any{1, "Invalid number of parameters, expected connection ID"}},
+		{"tcp/closeListener", tcpCloseListener, []any{1, "Invalid number of parameters, expected listener ID"}},
+		{"tcp/connectSSL", tcpConnectSSL, []any{1, "Invalid number of parameters, expected server address, port and optional TLS cert"}},
+		{"udp/connect", udpConnect, []any{1, "Invalid number of parameters, expected server address and port"}},
+		{"udp/beginPacket", udpBeginPacket, []any{1, "Invalid number of parameters, expected udpConnId, dest address, dest port"}},
+		{"udp/write", udpWrite, []any{1, "Invalid number of parameters, expected udpConnId, payload"}},
+		{"udp/endPacket", udpEndPacket, []any{1, "Invalid number of parameters, expected expected udpConnId"}},
+		{"udp/awaitPacket", udpAwaitPacket, []any{1, "Invalid number of parameters, expected (UDP connection ID[, optional timeout in ms])"}},
+		{"udp/dropPacket", udpDropPacket, []any{1, "Invalid number of parameters, expected (UDP connection ID[, optional timeout in ms])"}},
+		{"udp/read", udpRead, []any{1, "Invalid number of parameters, expected (UDP connection ID, max bytes to read)"}},
+		{"udp/close", udpClose, []any{1, "Invalid number of parameters, expected UDP connection ID"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.handler(&msgpackrpc.Connection{}, nil, func(result, err any) {
+				require.Nil(t, result)
+				require.Equal(t, test.wantErr, err)
+			})
+		})
+	}
 }
 
 func TestUDPDropPacket(t *testing.T) {

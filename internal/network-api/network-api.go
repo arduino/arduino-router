@@ -345,7 +345,7 @@ func tcpWrite(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Router
 
 func tcpConnectSSL(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 	n := len(params)
-	if n < 1 || n > 3 {
+	if n < 2 || n > 3 {
 		res(nil, []any{1, "Invalid number of parameters, expected server address, port and optional TLS cert"})
 		return
 	}
