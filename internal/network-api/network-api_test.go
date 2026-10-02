@@ -148,7 +148,7 @@ const testCert = "-----BEGIN CERTIFICATE-----\n" +
 	"-----END CERTIFICATE-----\n"
 
 func TestTCPNetworkAPI(t *testing.T) {
-	var rpc *msgpackrpc.Connection
+	rpc := &msgpackrpc.Connection{} // Bogus connection
 	var listID any
 	tcpListen(rpc, []any{"localhost", 9999}, func(res, err any) {
 		listID = res

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/arduino/arduino-router/internal/msgpackrouter"
+
 	"github.com/arduino/arduino-router/msgpackrpc"
 
 	"go.bug.st/f"
@@ -47,13 +48,19 @@ func Register(router *msgpackrouter.Router) {
 	f.NoError(router.RegisterMethod("udp/close", udpClose))
 }
 
+// socketID uniquely identifies a network socket by its ID and the associated rpc connection.
+type socketID struct {
+	id   uint
+	conn *msgpackrpc.Connection
+}
+
 var lock sync.RWMutex
-var liveConnections = make(map[uint]net.Conn)
-var liveListeners = make(map[uint]net.Listener)
-var liveUdpConnections = make(map[uint]net.PacketConn)
-var udpReadBuffers = make(map[uint][]byte)
-var udpWriteTargets = make(map[uint]*net.UDPAddr)
-var udpWriteBuffers = make(map[uint][]byte)
+var liveConnections = make(map[socketID]net.Conn)
+var liveListeners = make(map[socketID]net.Listener)
+var liveUdpConnections = make(map[socketID]net.PacketConn)
+var udpReadBuffers = make(map[socketID][]byte)
+var udpWriteTargets = make(map[socketID]*net.UDPAddr)
+var udpWriteBuffers = make(map[socketID][]byte)
 var nextConnectionID atomic.Uint32
 
 // Common errors
@@ -63,17 +70,19 @@ var errInvalidUDPConnectionIDType = []any{1, "Invalid parameter type, expected i
 var errInvalidConnectionIDType = []any{1, "Invalid parameter type, expected int for connection ID"}
 var errInvalidUDPUIntIDType = []any{1, "Invalid parameter type, expected uint for UDP connection ID"}
 
-// takeLockAndGenerateNextID generates a new unique ID for a connection or listener.
+// takeLockAndGenerateNextID generates a new socketID for a connection or listener.
 // It locks the global lock to ensure thread safety and checks for existing IDs.
-// It returns the new ID and a function to unlock the global lock.
-func takeLockAndGenerateNextID() (newID uint, unlock func()) {
+// It returns the new ID and a function to unlock the global lock, when the ID has
+// been used by the caller.
+func takeLockAndGenerateNextID(rpc *msgpackrpc.Connection) (newID socketID, unlock func()) {
 	lock.Lock()
 	for {
 		id := uint(nextConnectionID.Add(1))
-		_, exists1 := liveConnections[id]
-		_, exists2 := liveListeners[id]
+		newID = socketID{id: id, conn: rpc}
+		_, exists1 := liveConnections[newID]
+		_, exists2 := liveListeners[newID]
 		if !exists1 && !exists2 {
-			return id, func() {
+			return newID, func() {
 				lock.Unlock()
 			}
 		}
@@ -106,10 +115,10 @@ func tcpConnect(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Rout
 
 	// Successfully connected to the server
 
-	id, unlock := takeLockAndGenerateNextID()
-	liveConnections[id] = conn
+	sockId, unlock := takeLockAndGenerateNextID(rpc)
+	liveConnections[sockId] = conn
 	unlock()
-	res(id, nil)
+	res(sockId.id, nil)
 }
 
 func tcpListen(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
@@ -136,10 +145,10 @@ func tcpListen(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Route
 		return
 	}
 
-	id, unlock := takeLockAndGenerateNextID()
-	liveListeners[id] = listener
+	sockId, unlock := takeLockAndGenerateNextID(rpc)
+	liveListeners[sockId] = listener
 	unlock()
-	res(id, nil)
+	res(sockId.id, nil)
 }
 
 func tcpAccept(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
@@ -154,7 +163,7 @@ func tcpAccept(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Route
 	}
 
 	lock.RLock()
-	listener, exists := liveListeners[listenerID]
+	listener, exists := liveListeners[socketID{conn: rpc, id: listenerID}]
 	lock.RUnlock()
 
 	if !exists {
@@ -162,7 +171,7 @@ func tcpAccept(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Route
 		return
 	}
 
-	conn, err := listener.Accept()
+	sock, err := listener.Accept()
 	if err != nil {
 		res(nil, []any{3, "Failed to accept connection: " + err.Error()})
 		return
@@ -170,10 +179,10 @@ func tcpAccept(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Route
 
 	// Successfully accepted a connection
 
-	connID, unlock := takeLockAndGenerateNextID()
-	liveConnections[connID] = conn
+	sockID, unlock := takeLockAndGenerateNextID(rpc)
+	liveConnections[sockID] = sock
 	unlock()
-	res(connID, nil)
+	res(sockID.id, nil)
 }
 
 func tcpClose(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
@@ -187,10 +196,11 @@ func tcpClose(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Router
 		return
 	}
 
+	sockId := socketID{conn: rpc, id: id}
 	lock.Lock()
-	conn, existsConn := liveConnections[id]
+	conn, existsConn := liveConnections[sockId]
 	if existsConn {
-		delete(liveConnections, id)
+		delete(liveConnections, sockId)
 	}
 	lock.Unlock()
 
@@ -220,10 +230,11 @@ func tcpCloseListener(rpc *msgpackrpc.Connection, params []any, res msgpackroute
 		return
 	}
 
+	sockId := socketID{conn: rpc, id: id}
 	lock.Lock()
-	listener, existsListener := liveListeners[id]
+	listener, existsListener := liveListeners[sockId]
 	if existsListener {
-		delete(liveListeners, id)
+		delete(liveListeners, sockId)
 	}
 	lock.Unlock()
 
@@ -253,7 +264,7 @@ func tcpRead(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterR
 		return
 	}
 	lock.RLock()
-	conn, ok := liveConnections[id]
+	conn, ok := liveConnections[socketID{conn: rpc, id: id}]
 	lock.RUnlock()
 	if !ok {
 		res(nil, []any{2, fmt.Sprintf("Connection not found for ID: %d", id)})
@@ -304,7 +315,7 @@ func tcpWrite(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Router
 		return
 	}
 	lock.RLock()
-	conn, ok := liveConnections[id]
+	conn, ok := liveConnections[socketID{conn: rpc, id: id}]
 	lock.RUnlock()
 	if !ok {
 		res(nil, []any{2, fmt.Sprintf("Connection not found for ID: %d", id)})
@@ -379,10 +390,10 @@ func tcpConnectSSL(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.R
 
 	// Successfully connected to the server
 
-	id, unlock := takeLockAndGenerateNextID()
-	liveConnections[id] = conn
+	sockId, unlock := takeLockAndGenerateNextID(rpc)
+	liveConnections[sockId] = conn
 	unlock()
-	res(id, nil)
+	res(sockId.id, nil)
 }
 
 func udpConnect(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
@@ -415,10 +426,10 @@ func udpConnect(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Rout
 
 	// Successfully opened UDP channel
 
-	id, unlock := takeLockAndGenerateNextID()
-	liveUdpConnections[id] = udpConn
+	sockId, unlock := takeLockAndGenerateNextID(rpc)
+	liveUdpConnections[sockId] = udpConn
 	unlock()
-	res(id, nil)
+	res(sockId.id, nil)
 }
 
 func udpBeginPacket(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
@@ -442,9 +453,10 @@ func udpBeginPacket(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.
 		return
 	}
 
+	sockId := socketID{conn: rpc, id: id}
 	lock.RLock()
 	defer lock.RUnlock()
-	if _, ok := liveUdpConnections[id]; !ok {
+	if _, ok := liveUdpConnections[sockId]; !ok {
 		res(nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)})
 		return
 	}
@@ -454,8 +466,8 @@ func udpBeginPacket(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.
 		res(nil, []any{3, "Failed to resolve target address: " + err.Error()})
 		return
 	}
-	udpWriteTargets[id] = addr
-	udpWriteBuffers[id] = nil
+	udpWriteTargets[sockId] = addr
+	udpWriteBuffers[sockId] = nil
 	res(true, nil)
 }
 
@@ -480,10 +492,11 @@ func udpWrite(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Router
 		}
 	}
 
+	sockId := socketID{conn: rpc, id: id}
 	lock.RLock()
-	udpBuffer, ok := udpWriteBuffers[id]
+	udpBuffer, ok := udpWriteBuffers[sockId]
 	if ok {
-		udpWriteBuffers[id] = append(udpBuffer, data...)
+		udpWriteBuffers[sockId] = append(udpBuffer, data...)
 	}
 	lock.RUnlock()
 	if !ok {
@@ -507,12 +520,13 @@ func udpEndPacket(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Ro
 	var udpBuffer []byte
 	var udpAddr *net.UDPAddr
 	lock.RLock()
-	udpConn, connExists := liveUdpConnections[id]
+	sockId := socketID{conn: rpc, id: id}
+	udpConn, connExists := liveUdpConnections[sockId]
 	if connExists {
-		udpBuffer, buffExists = udpWriteBuffers[id]
-		udpAddr = udpWriteTargets[id]
-		delete(udpWriteBuffers, id)
-		delete(udpWriteTargets, id)
+		udpBuffer, buffExists = udpWriteBuffers[sockId]
+		udpAddr = udpWriteTargets[sockId]
+		delete(udpWriteBuffers, sockId)
+		delete(udpWriteTargets, sockId)
 	}
 	lock.RUnlock()
 	if !connExists {
@@ -551,8 +565,9 @@ func udpAwaitPacket(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.
 		}
 	}
 
+	sockId := socketID{conn: rpc, id: id}
 	lock.RLock()
-	udpConn, ok := liveUdpConnections[id]
+	udpConn, ok := liveUdpConnections[sockId]
 	lock.RUnlock()
 	if !ok {
 		res(nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)})
@@ -604,7 +619,7 @@ func udpDropPacket(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.R
 	}
 
 	lock.RLock()
-	delete(udpReadBuffers, id)
+	delete(udpReadBuffers, socketID{conn: rpc, id: id})
 	lock.RUnlock()
 	if !ok {
 		res(nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)})
@@ -629,16 +644,17 @@ func udpRead(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterR
 		return
 	}
 
+	sockId := socketID{conn: rpc, id: id}
 	lock.Lock()
-	buffer, exists := udpReadBuffers[id]
+	buffer, exists := udpReadBuffers[sockId]
 	n := uint(len(buffer))
 	if exists {
 		// keep the remainder of the buffer for the next read
 		if n > maxBytes {
-			udpReadBuffers[id] = buffer[maxBytes:]
+			udpReadBuffers[sockId] = buffer[maxBytes:]
 			n = maxBytes
 		} else {
-			delete(udpReadBuffers, id)
+			delete(udpReadBuffers, sockId)
 		}
 	}
 	lock.Unlock()
@@ -657,10 +673,11 @@ func udpClose(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.Router
 		return
 	}
 
+	sockId := socketID{conn: rpc, id: id}
 	lock.Lock()
-	udpConn, existsConn := liveUdpConnections[id]
-	delete(liveUdpConnections, id)
-	delete(udpReadBuffers, id)
+	udpConn, existsConn := liveUdpConnections[sockId]
+	delete(liveUdpConnections, sockId)
+	delete(udpReadBuffers, sockId)
 	lock.Unlock()
 
 	if !existsConn {
