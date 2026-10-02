@@ -253,6 +253,29 @@ func TestTCPNetworkAPI(t *testing.T) {
 	wg.Wait()
 }
 
+func TestUDPDropPacket(t *testing.T) {
+	var connectionID uint
+	udpConnect(nil, []any{"", 0}, func(result, err any) {
+		require.Nil(t, err)
+		connectionID = result.(uint)
+	})
+	defer udpClose(nil, []any{connectionID}, func(_, _ any) {})
+
+	sockID := socketID{id: connectionID}
+	lock.Lock()
+	udpReadBuffers[sockID] = []byte("discard me")
+	lock.Unlock()
+
+	udpDropPacket(nil, []any{connectionID}, func(result, err any) {
+		require.Nil(t, err)
+		require.Equal(t, true, result)
+	})
+	udpRead(nil, []any{connectionID, 100}, func(result, err any) {
+		require.Nil(t, err)
+		require.Empty(t, result)
+	})
+}
+
 const anyHost = "0.0.0.0"
 const localHost = "127.0.0.1"
 

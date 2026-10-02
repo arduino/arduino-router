@@ -620,13 +620,14 @@ func udpDropPacket(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.R
 		return
 	}
 
-	lock.RLock()
-	delete(udpReadBuffers, socketID{conn: rpc, id: id})
-	lock.RUnlock()
-	if !ok {
+	sockId := socketID{conn: rpc, id: id}
+	lock.Lock()
+	defer lock.Unlock()
+	if _, ok := liveUdpConnections[sockId]; !ok {
 		res(nil, []any{2, fmt.Sprintf("UDP connection not found for ID: %d", id)})
 		return
 	}
+	delete(udpReadBuffers, sockId)
 	res(true, nil)
 }
 
