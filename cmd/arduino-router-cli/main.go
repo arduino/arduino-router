@@ -226,7 +226,7 @@ func encode(v any) []string {
 		return []string{"nil"}
 	case bool:
 		return []string{fmt.Sprint(val)}
-	case int:
+	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
 		return []string{fmt.Sprint(val)}
 	case float32:
 		return []string{fmt.Sprintf("f32:%v", val)}
