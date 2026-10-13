@@ -272,3 +272,27 @@ func TestInvalidConfig(t *testing.T) {
 	_, err = New(noisyline.New(1).OpenA(), Config{KeepAliveInterval: time.Second, LinkTimeout: time.Second})
 	require.Error(t, err)
 }
+
+func TestPeerRebootSameNonce(t *testing.T) {
+	l := noisyline.New(1)
+	a, b := newLink(t, l.OpenA()), newLink(t, l.OpenB())
+	exchange(t, a, b, 1000)
+
+	// B reboots silently and picks the same nonce as before (e.g. because it
+	// has no good source of randomness)
+	l.BtoA().SetBlackhole(true)
+	require.NoError(t, b.Close())
+	l.BtoA().SetBlackhole(false)
+	oldNonce := b.nonce
+	newNonce = func() uint32 { return oldNonce }
+	defer func() { newNonce = rand.Uint32 }()
+	b = newLink(t, l.OpenB())
+
+	// A must not mistake the new SYN for a retransmission of the old one
+	_, err := a.Read(make([]byte, 10))
+	require.ErrorIs(t, err, ErrSessionReset)
+
+	require.NoError(t, a.Close())
+	a = newLink(t, l.OpenA())
+	exchange(t, a, b, 10000)
+}

@@ -53,12 +53,18 @@
 // payload is the minimum of the two, and each side never has more DATA frames
 // in flight than the window announced by the peer in its SYN/SYN_ACK.
 //
-// An established side receiving a SYN with a different nonce (the peer
-// restarted), or a RST, terminates the session: Read and Write fail with
-// ErrSessionReset and the upper layer must drop any partially decoded state
-// and open a new Link. A side that is not established and receives DATA/ACK/NAK
-// from an unknown peer answers with RST, so a peer stuck on an old session
-// notices and restarts.
+// An established side receiving a RST, or a SYN with a different nonce (the
+// peer restarted), terminates the session. A SYN with the same nonce is a
+// retransmission (our SYN_ACK was lost) and is answered again with a SYN_ACK,
+// unless the peer already sent DATA/ACK/NAK in this session: a peer sends SYN
+// only until it is established, so that SYN comes from a restarted peer that
+// happened to pick the same nonce, and terminates the session too. When the
+// session is terminated, Read and Write fail with ErrSessionReset and the
+// upper layer must drop any partially decoded state and open a new Link.
+//
+// A side that is not established and receives DATA/ACK/NAK from an unknown
+// peer answers with RST, so a peer stuck on an old session notices and
+// restarts.
 //
 // # Reliability (Go-Back-N)
 //

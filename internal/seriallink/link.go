@@ -19,6 +19,9 @@ import (
 	"github.com/arduino/arduino-router/internal/cobs"
 )
 
+// newNonce generates session nonces (replaced in tests).
+var newNonce = rand.Uint32
+
 var (
 	// ErrClosed is returned by Read and Write after Close has been called.
 	ErrClosed = errors.New("seriallink: link closed")
@@ -120,6 +123,7 @@ type Link struct {
 	nonce       uint32
 	peer        synParams
 	peerKnown   bool // we received (and answered) a SYN from the current peer
+	peerActive  bool // the peer sent DATA/ACK/NAK in this session (so it is established)
 	maxPayload  int  // negotiated
 	sendWindow  int  // negotiated
 	synDeadline time.Time
@@ -166,7 +170,7 @@ func New(port io.ReadWriteCloser, cfg Config) (*Link, error) {
 		port:        port,
 		cfg:         cfg,
 		state:       stateConnecting,
-		nonce:       rand.Uint32(),
+		nonce:       newNonce(),
 		maxPayload:  cfg.MaxPayload,
 		recvCap:     cfg.Window * cfg.MaxPayload,
 		synDeadline: now,
@@ -490,10 +494,13 @@ func (l *Link) handleFrame(f frame, now time.Time) {
 			if !ok {
 				return
 			}
-			if p.nonce == l.peer.nonce {
+			if p.nonce == l.peer.nonce && !l.peerActive {
 				l.sendSynAck() // our SYN_ACK was lost
 			} else {
-				l.terminate(ErrSessionReset, false) // the peer restarted
+				// The peer restarted. A peer sends SYN only until it is
+				// established, so a SYN after DATA/ACK/NAK means a new session
+				// even if the nonce is the same (e.g. a weak random source).
+				l.terminate(ErrSessionReset, false)
 			}
 		case frameSynAck:
 			// duplicate, ignore
@@ -523,6 +530,8 @@ func (l *Link) establish(now time.Time) {
 
 // handleEstablished processes DATA, ACK and NAK frames. Must be called with l.mu held.
 func (l *Link) handleEstablished(f frame, now time.Time) {
+	l.peerActive = true
+
 	// Process the (piggybacked) acknowledgement
 	if n := int(f.ack - (l.nextSeq - uint8(len(l.unacked)))); n <= len(l.unacked) {
 		if n > 0 {
