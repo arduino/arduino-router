@@ -87,6 +87,17 @@ func (f *frame) appendEncoded(dst []byte) []byte {
 	return append(dst, 0)
 }
 
+// IsValidFrame returns true if encoded (without the 0x00 delimiter) is a valid
+// frame of this protocol: correct COBS encoding, CRC, version and type. It can
+// be used to detect whether a peer is speaking this protocol.
+func IsValidFrame(encoded []byte) bool {
+	if len(encoded) > maxEncodedFrameSize(MaxPayloadLimit) {
+		return false
+	}
+	_, err := decodeFrame(encoded)
+	return err == nil
+}
+
 // decodeFrame decodes a COBS-encoded frame (without the delimiter).
 func decodeFrame(encoded []byte) (frame, error) {
 	raw, err := cobs.Decode(make([]byte, 0, len(encoded)), encoded)

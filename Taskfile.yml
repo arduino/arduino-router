@@ -48,7 +48,7 @@ tasks:
       ROUTERBRIDGE_DIR: '{{ .ROUTERBRIDGE_DIR | default "Arduino_RouterBridge" }}'
     cmds:
       - make -C {{ .ROUTERBRIDGE_DIR }}/extras/seriallink-test peer
-      - SERIALLINK_PEER="$(cd {{ .ROUTERBRIDGE_DIR }}/extras/seriallink-test && pwd)/seriallink_peer" go test ./internal/seriallink -run Interop -v -race {{ .CLI_ARGS }}
+      - SERIALLINK_PEER="$(cd {{ .ROUTERBRIDGE_DIR }}/extras/seriallink-test && pwd)/seriallink_peer" go test ./internal/seriallink ./internal/serialdetect -run Interop -v -race {{ .CLI_ARGS }}
 
   test:cover:
     desc: Run all tests and open cover html report

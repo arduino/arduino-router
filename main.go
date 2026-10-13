@@ -33,6 +33,7 @@ import (
 	"github.com/arduino/arduino-router/internal/monitorapi"
 	"github.com/arduino/arduino-router/internal/msgpackrouter"
 	networkapi "github.com/arduino/arduino-router/internal/network-api"
+	"github.com/arduino/arduino-router/internal/serialdetect"
 	"github.com/arduino/arduino-router/internal/seriallink"
 	"github.com/arduino/arduino-router/msgpackrpc"
 )
@@ -79,7 +80,7 @@ func main() {
 	cmd.Flags().StringVar(&cfg.AfterReadyCommand, "after-ready", "", "Execute a command after the router is ready)")
 	cmd.Flags().StringVarP(&cfg.SerialPortAddr, "serial-port", "p", "", "Serial port address")
 	cmd.Flags().IntVarP(&cfg.SerialBaudRate, "serial-baudrate", "b", 115200, "Serial port baud rate")
-	cmd.Flags().StringVar(&cfg.SerialProtocol, "serial-protocol", "raw", "Serial port protocol: 'raw' (plain msgpack-rpc) or 'reliable' (msgpack-rpc over a framed link with integrity check, retransmission and flow control)")
+	cmd.Flags().StringVar(&cfg.SerialProtocol, "serial-protocol", "auto", "Serial port protocol: 'raw' (plain msgpack-rpc), 'reliable' (msgpack-rpc over a framed link with integrity check, retransmission and flow control) or 'auto' (detect the protocol used by the MCU)")
 	cmd.Flags().StringVarP(&cfg.MonitorPortAddr, "monitor-port", "m", "127.0.0.1:7500", "Listening port for MCU monitor proxy")
 	cmd.AddCommand(&cobra.Command{
 		Use:  "version",
@@ -185,7 +186,7 @@ func startRouter(ctx context.Context, cfg Config) error {
 
 	// Open serial port if specified
 	if cfg.SerialPortAddr != "" {
-		if cfg.SerialProtocol != "raw" && cfg.SerialProtocol != "reliable" {
+		if cfg.SerialProtocol != "raw" && cfg.SerialProtocol != "reliable" && cfg.SerialProtocol != "auto" {
 			return fmt.Errorf("invalid serial protocol: %s", cfg.SerialProtocol)
 		}
 		var serialLock sync.Mutex
@@ -267,11 +268,19 @@ func startRouter(ctx context.Context, cfg Config) error {
 					continue
 				}
 				slog.Info("Opened serial connection", "serial", cfg.SerialPortAddr, "protocol", cfg.SerialProtocol)
+				newReliable := func(port io.ReadWriteCloser) (io.ReadWriteCloser, error) {
+					return seriallink.New(port, seriallink.Config{})
+				}
 				var stream io.ReadWriteCloser = serialPort
-				if cfg.SerialProtocol == "reliable" {
-					link, err := seriallink.New(serialPort, seriallink.Config{})
+				switch cfg.SerialProtocol {
+				case "reliable":
+					link, err := newReliable(serialPort)
 					f.Assert(err == nil, "Failed to create serial link")
 					stream = link
+				case "auto":
+					stream = serialdetect.NewAutoStream(serialPort, newReliable, func(p serialdetect.Protocol) {
+						slog.Info("Detected serial protocol", "serial", cfg.SerialPortAddr, "protocol", p)
+					})
 				}
 				wr := &MsgpackDebugStream{Name: cfg.SerialPortAddr, Upstream: stream}
 
