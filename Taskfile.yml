@@ -42,6 +42,14 @@ tasks:
     cmds:
       - go test ./... -v -race {{ .CLI_ARGS }}
 
+  test:interop:
+    desc: Run the seriallink interoperability tests against the C++ implementation of the Arduino_RouterBridge library (path set with ROUTERBRIDGE_DIR)
+    vars:
+      ROUTERBRIDGE_DIR: '{{ .ROUTERBRIDGE_DIR | default "Arduino_RouterBridge" }}'
+    cmds:
+      - make -C {{ .ROUTERBRIDGE_DIR }}/extras/seriallink-test peer
+      - SERIALLINK_PEER="$(cd {{ .ROUTERBRIDGE_DIR }}/extras/seriallink-test && pwd)/seriallink_peer" go test ./internal/seriallink -run Interop -v -race {{ .CLI_ARGS }}
+
   test:cover:
     desc: Run all tests and open cover html report
     cmds:
