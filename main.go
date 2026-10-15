@@ -242,6 +242,15 @@ func startRouter(ctx context.Context, cfg Config) error {
 			res(true, nil)
 		})
 		f.Assert(err == nil, "Failed to register $/serial/close method")
+		var stats serialStats
+		err = router.RegisterMethod("$/serial/stats", func(_ *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
+			if len(params) != 0 {
+				res(nil, []any{1, "Invalid number of parameters"})
+				return
+			}
+			res(stats.get(), nil)
+		})
+		f.Assert(err == nil, "Failed to register $/serial/stats method")
 		go func() {
 			for {
 				serialOpened.L.Lock()
@@ -269,17 +278,28 @@ func startRouter(ctx context.Context, cfg Config) error {
 				}
 				slog.Info("Opened serial connection", "serial", cfg.SerialPortAddr, "protocol", cfg.SerialProtocol)
 				newReliable := func(port io.ReadWriteCloser) (io.ReadWriteCloser, error) {
-					return seriallink.New(port, seriallink.Config{})
+					link, err := seriallink.New(port, seriallink.Config{})
+					if err != nil {
+						return nil, err
+					}
+					stats.newSession("reliable", link)
+					return link, nil
 				}
 				var stream io.ReadWriteCloser = serialPort
 				switch cfg.SerialProtocol {
+				case "raw":
+					stats.newSession("raw", nil)
 				case "reliable":
 					link, err := newReliable(serialPort)
 					f.Assert(err == nil, "Failed to create serial link")
 					stream = link
 				case "auto":
+					stats.newSession("", nil)
 					stream = serialdetect.NewAutoStream(serialPort, newReliable, func(p serialdetect.Protocol) {
 						slog.Info("Detected serial protocol", "serial", cfg.SerialPortAddr, "protocol", p)
+						if p == serialdetect.Raw {
+							stats.newSession("raw", nil)
+						}
 					})
 				}
 				wr := &MsgpackDebugStream{Name: cfg.SerialPortAddr, Upstream: stream}
@@ -348,6 +368,49 @@ func startRouter(ctx context.Context, cfg Config) error {
 	}
 
 	return nil
+}
+
+// serialStats keeps track of the statistics of the serial links: a new link is
+// created every time the serial port is opened or the MCU restarts.
+type serialStats struct {
+	mu       sync.Mutex
+	protocol string           // protocol of the current session, empty if not yet known
+	link     *seriallink.Link // link of the current session, nil if not using the reliable protocol
+	closed   seriallink.Stats // sum of the counters of the previous links
+	sessions int              // number of reliable links created
+}
+
+// serialStatsResponse is the result of the $/serial/stats method.
+type serialStatsResponse struct {
+	Protocol string           `msgpack:"protocol"` // "raw", "reliable" or "" if not yet known
+	Sessions int              `msgpack:"sessions"` // number of reliable link sessions since the router started
+	Current  seriallink.Stats `msgpack:"current"`  // counters of the current reliable link session
+	Total    seriallink.Stats `msgpack:"total"`    // counters of all the reliable link sessions
+}
+
+// newSession starts tracking a new session, link is nil if the protocol is not "reliable".
+func (s *serialStats) newSession(protocol string, link *seriallink.Link) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.link != nil {
+		s.closed.Add(s.link.Stats())
+	}
+	s.protocol = protocol
+	s.link = link
+	if link != nil {
+		s.sessions++
+	}
+}
+
+func (s *serialStats) get() serialStatsResponse {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res := serialStatsResponse{Protocol: s.protocol, Sessions: s.sessions, Total: s.closed}
+	if s.link != nil {
+		res.Current = s.link.Stats()
+		res.Total.Add(res.Current)
+	}
+	return res
 }
 
 func waitForPort(ctx context.Context, waitPort string) error {

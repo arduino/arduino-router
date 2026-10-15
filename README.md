@@ -76,6 +76,17 @@ The Router has a RPC methods to "open" and "close" the serial connection on requ
 - The `$/serial/open` method will open the serial port connection. This method returns immediately.
 - The `$/serial/close` method will close the serial port connection. This method returns only after the port has been successfully disconnected.
 
+### `$/serial/stats` returns the statistics of the serial link
+
+This method takes no parameters and returns a map with:
+
+- `protocol`: the protocol used on the serial port (`"raw"` or `"reliable"`), empty if not yet detected.
+- `sessions`: the number of reliable link sessions established since the Router started (a new session starts every time the port is opened or the MCU restarts).
+- `current`: the counters of the current reliable link session.
+- `total`: the counters summed over all the reliable link sessions.
+
+The counters (`tx_frames`, `tx_data_frames`, `tx_acked_frames`, `tx_acked_bytes`, `tx_naks`, `retransmits`, `retransmit_timeouts`, `rx_frames`, `rx_data_frames`, `rx_data_bytes`, `rx_duplicates`, `rx_out_of_order`, `rx_naks`, `rx_errors`, `rx_crc_errors`, `rx_framing_errors`, `rx_protocol_errors`) are described in `internal/seriallink/link.go`. They are all zero when the raw protocol is used.
+
 ### `$/setMaxMsgSize <MAX_SIZE_IN_BYTES>` sets the maximum message size allowed by the Router
 
 A call to this method sets the maximum size of a message (in bytes) that the Router will allow to pass-through.

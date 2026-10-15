@@ -84,8 +84,17 @@ func TestCleanLine(t *testing.T) {
 	l := noisyline.New(1)
 	a, b := newLink(t, l.OpenA()), newLink(t, l.OpenB())
 	exchange(t, a, b, 512*1024)
-	require.Zero(t, a.Stats().RxErrors)
-	require.Zero(t, b.Stats().RxErrors)
+	sa, sb := a.Stats(), b.Stats()
+	require.Zero(t, sa.RxErrors)
+	require.Zero(t, sb.RxErrors)
+	require.Zero(t, sa.Retransmits+sb.Retransmits)
+	require.EqualValues(t, 512*1024, sa.RxDataBytes)
+	require.EqualValues(t, 512*1024, sb.RxDataBytes)
+	// The last acks may still be in flight
+	require.Eventually(t, func() bool {
+		sa, sb := a.Stats(), b.Stats()
+		return sa.TxAckedBytes == 512*1024 && sa.TxAckedFrames == sb.RxDataFrames && sa.TxDataFrames == sa.TxAckedFrames
+	}, time.Second, 10*time.Millisecond)
 }
 
 func TestNoisyLine(t *testing.T) {
@@ -98,6 +107,11 @@ func TestNoisyLine(t *testing.T) {
 	t.Logf("B: %+v", sb)
 	require.NotZero(t, sa.RxErrors+sb.RxErrors, "faults were not injected")
 	require.NotZero(t, sa.Retransmits+sb.Retransmits, "nothing was retransmitted")
+	for _, st := range []Stats{sa, sb} {
+		require.Equal(t, st.RxErrors, st.RxCRCErrors+st.RxFramingErrors+st.RxProtocolErrors)
+		require.EqualValues(t, 128*1024, st.RxDataBytes)
+		require.GreaterOrEqual(t, st.TxDataFrames, st.TxAckedFrames)
+	}
 }
 
 func TestPeerStartsLater(t *testing.T) {

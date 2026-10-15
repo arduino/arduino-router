@@ -94,10 +94,44 @@ func (c *Config) setDefaults() error {
 
 // Stats contains link counters, useful for diagnostics.
 type Stats struct {
-	TxFrames    int // frames written to the port
-	RxFrames    int // valid frames received
-	RxErrors    int // frames dropped because corrupted
-	Retransmits int // DATA frames sent again
+	TxFrames           uint64 `msgpack:"tx_frames"`           // frames written to the port (any type)
+	TxDataFrames       uint64 `msgpack:"tx_data_frames"`      // DATA frames written to the port (retransmissions included)
+	TxAckedFrames      uint64 `msgpack:"tx_acked_frames"`     // DATA frames acknowledged by the peer (successfully transmitted)
+	TxAckedBytes       uint64 `msgpack:"tx_acked_bytes"`      // stream bytes acknowledged by the peer
+	TxNaks             uint64 `msgpack:"tx_naks"`             // NAK frames queued for sending
+	Retransmits        uint64 `msgpack:"retransmits"`         // DATA frames sent again
+	RetransmitTimeouts uint64 `msgpack:"retransmit_timeouts"` // retransmission timer expirations
+	RxFrames           uint64 `msgpack:"rx_frames"`           // valid frames received (any type)
+	RxDataFrames       uint64 `msgpack:"rx_data_frames"`      // DATA frames accepted in order (successfully received)
+	RxDataBytes        uint64 `msgpack:"rx_data_bytes"`       // stream bytes accepted
+	RxDuplicates       uint64 `msgpack:"rx_duplicates"`       // DATA frames dropped because already received
+	RxOutOfOrder       uint64 `msgpack:"rx_out_of_order"`     // DATA frames dropped because a previous one was lost
+	RxNaks             uint64 `msgpack:"rx_naks"`             // NAK frames received
+	RxErrors           uint64 `msgpack:"rx_errors"`           // frames dropped because corrupted (sum of the following)
+	RxCRCErrors        uint64 `msgpack:"rx_crc_errors"`       // frames with a CRC mismatch
+	RxFramingErrors    uint64 `msgpack:"rx_framing_errors"`   // frames with a bad COBS encoding, too short or too long
+	RxProtocolErrors   uint64 `msgpack:"rx_protocol_errors"`  // frames with an unknown protocol version or frame type
+}
+
+// Add adds the counters of o to s.
+func (s *Stats) Add(o Stats) {
+	s.TxFrames += o.TxFrames
+	s.TxDataFrames += o.TxDataFrames
+	s.TxAckedFrames += o.TxAckedFrames
+	s.TxAckedBytes += o.TxAckedBytes
+	s.TxNaks += o.TxNaks
+	s.Retransmits += o.Retransmits
+	s.RetransmitTimeouts += o.RetransmitTimeouts
+	s.RxFrames += o.RxFrames
+	s.RxDataFrames += o.RxDataFrames
+	s.RxDataBytes += o.RxDataBytes
+	s.RxDuplicates += o.RxDuplicates
+	s.RxOutOfOrder += o.RxOutOfOrder
+	s.RxNaks += o.RxNaks
+	s.RxErrors += o.RxErrors
+	s.RxCRCErrors += o.RxCRCErrors
+	s.RxFramingErrors += o.RxFramingErrors
+	s.RxProtocolErrors += o.RxProtocolErrors
 }
 
 type linkState int
@@ -346,7 +380,7 @@ func (l *Link) retransmit() {
 	for _, f := range l.unacked {
 		l.enqueue(f)
 	}
-	l.stats.Retransmits += len(l.unacked)
+	l.stats.Retransmits += uint64(len(l.unacked))
 }
 
 // isAcked returns true if the DATA frame with the given seq has already been
@@ -397,6 +431,7 @@ func (l *Link) sendLoop() {
 		}
 		l.stats.TxFrames++
 		if f.typ == frameData {
+			l.stats.TxDataFrames++
 			l.rtoStart = time.Now()
 		}
 		l.wake()
@@ -448,6 +483,14 @@ func (l *Link) receive(encoded []byte, discarded bool) {
 	defer l.mu.Unlock()
 	if err != nil {
 		l.stats.RxErrors++
+		switch {
+		case errors.Is(err, errFrameCRC):
+			l.stats.RxCRCErrors++
+		case errors.Is(err, errFrameVersion), errors.Is(err, errFrameType):
+			l.stats.RxProtocolErrors++
+		default:
+			l.stats.RxFramingErrors++
+		}
 		return
 	}
 	l.stats.RxFrames++
@@ -535,6 +578,10 @@ func (l *Link) handleEstablished(f frame, now time.Time) {
 	// Process the (piggybacked) acknowledgement
 	if n := int(f.ack - (l.nextSeq - uint8(len(l.unacked)))); n <= len(l.unacked) {
 		if n > 0 {
+			for _, acked := range l.unacked[:n] {
+				l.stats.TxAckedBytes += uint64(len(acked.payload))
+			}
+			l.stats.TxAckedFrames += uint64(n)
 			l.unacked = l.unacked[n:]
 			l.retries = 0
 			l.rtoStart = now
@@ -545,6 +592,7 @@ func (l *Link) handleEstablished(f frame, now time.Time) {
 
 	switch f.typ {
 	case frameNak:
+		l.stats.RxNaks++
 		l.retransmit()
 	case frameData:
 		switch d := f.seq - l.expected; {
@@ -553,6 +601,8 @@ func (l *Link) handleEstablished(f frame, now time.Time) {
 				return // the peer did not respect the negotiated limits
 			}
 			l.recvBuf.Write(f.payload)
+			l.stats.RxDataFrames++
+			l.stats.RxDataBytes += uint64(len(f.payload))
 			l.expected++
 			l.nakSent = false
 			l.ackPending++
@@ -565,11 +615,14 @@ func (l *Link) handleEstablished(f frame, now time.Time) {
 			l.cond.Broadcast()
 		case d >= 128:
 			// Duplicate: our ack has probably been lost
+			l.stats.RxDuplicates++
 			l.enqueueAck()
 		default:
 			// A frame has been lost: ask to go back (only once)
+			l.stats.RxOutOfOrder++
 			if !l.nakSent {
 				l.nakSent = true
+				l.stats.TxNaks++
 				l.enqueue(frame{typ: frameNak})
 			}
 		}
@@ -621,6 +674,7 @@ func (l *Link) onTimer(now time.Time) time.Time {
 		if len(l.unacked) > 0 && l.queuedData == 0 {
 			rto := l.rtoStart.Add(l.cfg.RetransmitTimeout)
 			if !now.Before(rto) {
+				l.stats.RetransmitTimeouts++
 				l.retries++
 				if l.retries > l.cfg.MaxRetries {
 					l.terminate(ErrLinkTimeout, true)
