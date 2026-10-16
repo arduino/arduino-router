@@ -38,7 +38,10 @@ func main() {
 			"      - Use '{' and '}' to start and end a map.\n" +
 			"        Keys and values should be listed in order { KEY1 VAL1 KEY2 VAL2 }.\n" +
 			"      - Any other value is treated as a string, or you may use the 'str:' prefix\n" +
-			"        explicitly in case of ambiguity (e.g. str:42)",
+			"        explicitly in case of ambiguity (e.g. str:42)\n" +
+			"\n" +
+			"  The call response is printed with a return code 0.\n" +
+			"  If the call returns an error, it is printed with a return code 1.",
 		Run: func(cmd *cobra.Command, cliArgs []string) {
 			// Compose method and arguments
 			args, rest, err := composeArgs(append(append([]string{"["}, cliArgs[1:]...), "]"))
@@ -74,10 +77,12 @@ func main() {
 				if rpcErr != nil {
 					fmt.Print("Got RPC error: ")
 					print(rpcErr)
+					os.Exit(1)
 				}
 				if rpcResp != nil {
 					fmt.Print("Got RPC response: ")
 					print(rpcResp)
+					os.Exit(0)
 				}
 			}
 		},
@@ -92,7 +97,7 @@ func main() {
 		"Server address (file path for unix socket or host:port for TCP socket)")
 	if err := cmd.Execute(); err != nil {
 		fmt.Printf("Use: %s -h for help.\n", appname)
-		os.Exit(1)
+		os.Exit(200)
 	}
 }
 
