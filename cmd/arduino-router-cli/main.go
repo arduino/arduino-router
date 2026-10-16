@@ -22,6 +22,7 @@ import (
 func main() {
 	var notification bool
 	var server string
+	var verbose bool
 	appname := os.Args[0]
 	cmd := cobra.Command{
 		Short: "Send a MsgPack RPC REQUEST or NOTIFICATION.",
@@ -40,8 +41,9 @@ func main() {
 			"      - Any other value is treated as a string, or you may use the 'str:' prefix\n" +
 			"        explicitly in case of ambiguity (e.g. str:42)\n" +
 			"\n" +
-			"  The call response is printed with a return code 0.\n" +
-			"  If the call returns an error, it is printed with a return code 1.",
+			"  The call response is printed in JSON (unless verbose flag is set, in such case other\n" +
+			"  details are printed in plain text) with a return code 0.\n" +
+			"  If the call returns an error, it is printed in JSON with a return code 1.",
 		Run: func(cmd *cobra.Command, cliArgs []string) {
 			// Compose method and arguments
 			args, rest, err := composeArgs(append(append([]string{"["}, cliArgs[1:]...), "]"))
@@ -67,20 +69,26 @@ func main() {
 				os.Exit(1)
 			}
 
-			if notification {
-				fmt.Printf("Sending notification for method '%s', with parameters: ", method)
-			} else {
-				fmt.Printf("Sending request for method '%s', with parameters: ", method)
+			if verbose {
+				if notification {
+					fmt.Printf("Sending notification for method '%s', with parameters: ", method)
+				} else {
+					fmt.Printf("Sending request for method '%s', with parameters: ", method)
+				}
+				print(args)
 			}
-			print(args)
 			if !notification {
 				if rpcErr != nil {
-					fmt.Print("Got RPC error: ")
+					if verbose {
+						fmt.Print("Got RPC error: ")
+					}
 					print(rpcErr)
 					os.Exit(1)
 				}
 				if rpcResp != nil {
-					fmt.Print("Got RPC response: ")
+					if verbose {
+						fmt.Print("Got RPC response: ")
+					}
 					print(rpcResp)
 					os.Exit(0)
 				}
@@ -95,6 +103,9 @@ func main() {
 	cmd.Flags().StringVarP(
 		&server, "server", "s", "/var/run/arduino-router.sock",
 		"Server address (file path for unix socket or host:port for TCP socket)")
+	cmd.Flags().BoolVarP(
+		&verbose, "verbose", "v", false,
+		"Increase verbosity of the output")
 	if err := cmd.Execute(); err != nil {
 		fmt.Printf("Use: %s -h for help.\n", appname)
 		os.Exit(200)
