@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -209,57 +210,6 @@ func send(ctx context.Context, server string, method string, args []any, notific
 }
 
 func print(v any) {
-	for _, l := range encode(v) {
-		fmt.Println(l)
-	}
-}
-
-func encode(v any) []string {
-	indent := func(in []string) []string {
-		for i := range in {
-			in[i] = "  " + in[i]
-		}
-		return in
-	}
-	switch val := v.(type) {
-	case nil:
-		return []string{"nil"}
-	case bool:
-		return []string{fmt.Sprint(val)}
-	case int, int8, int16, int32, int64, uint, uint8, uint16, uint32, uint64:
-		return []string{fmt.Sprint(val)}
-	case float32:
-		return []string{fmt.Sprintf("f32:%v", val)}
-	case float64:
-		return []string{fmt.Sprintf("f64:%v", val)}
-	case string:
-		return []string{fmt.Sprintf("%q", val)}
-	case []any:
-		if len(val) == 0 {
-			return []string{"[ ]"}
-		}
-		result := []string{"["}
-		for _, elem := range val {
-			result = append(result, indent(encode(elem))...)
-		}
-		result = append(result, "]")
-		return result
-	case map[any]any:
-		if len(val) == 0 {
-			return []string{"{ }"}
-		}
-		result := []string{"{"}
-		for k, v := range val {
-			key := indent(encode(k))
-			value := encode(v)
-			i := len(key) - 1
-			key[i] = key[i] + ": " + value[0]
-			result = append(result, key...)
-			result = append(result, indent(value[1:])...)
-		}
-		result = append(result, "}")
-		return result
-	default:
-		panic(fmt.Sprintf("unsupported type: %T", v))
-	}
+	b, _ := json.MarshalIndent(v, "", "  ")
+	fmt.Println(string(b))
 }
