@@ -19,6 +19,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -302,7 +303,7 @@ func startRouter(ctx context.Context, cfg Config) error {
 						}
 					})
 				}
-				wr := &MsgpackDebugStream{Name: cfg.SerialPortAddr, Upstream: stream}
+				wr := &MsgpackDebugStream{Name: cfg.SerialPortAddr, Upstream: stats.count(stream)}
 
 				// wait for the close command from RPC or for a failure of the serial port (routerExit)
 				routerExit := router.Accept(wr)
@@ -378,6 +379,8 @@ type serialStats struct {
 	link     *seriallink.Link // link of the current session, nil if not using the reliable protocol
 	closed   seriallink.Stats // sum of the counters of the previous links
 	sessions int              // number of reliable links created
+
+	rxBytes, txBytes atomic.Uint64 // msgpack-rpc stream bytes, any protocol
 }
 
 // serialStatsResponse is the result of the $/serial/stats method.
@@ -386,6 +389,8 @@ type serialStatsResponse struct {
 	Sessions int              `msgpack:"sessions"` // number of reliable link sessions since the router started
 	Current  seriallink.Stats `msgpack:"current"`  // counters of the current reliable link session
 	Total    seriallink.Stats `msgpack:"total"`    // counters of all the reliable link sessions
+	RxBytes  uint64           `msgpack:"rx_bytes"` // msgpack-rpc stream bytes received from the MCU, any protocol
+	TxBytes  uint64           `msgpack:"tx_bytes"` // msgpack-rpc stream bytes sent to the MCU, any protocol
 }
 
 // newSession starts tracking a new session, link is nil if the protocol is not "reliable".
@@ -405,12 +410,41 @@ func (s *serialStats) newSession(protocol string, link *seriallink.Link) {
 func (s *serialStats) get() serialStatsResponse {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	res := serialStatsResponse{Protocol: s.protocol, Sessions: s.sessions, Total: s.closed}
+	res := serialStatsResponse{
+		Protocol: s.protocol,
+		Sessions: s.sessions,
+		Total:    s.closed,
+		RxBytes:  s.rxBytes.Load(),
+		TxBytes:  s.txBytes.Load(),
+	}
 	if s.link != nil {
 		res.Current = s.link.Stats()
 		res.Total.Add(res.Current)
 	}
 	return res
+}
+
+// count returns stream wrapped to count the bytes read and written.
+func (s *serialStats) count(stream io.ReadWriteCloser) io.ReadWriteCloser {
+	return &countingStream{ReadWriteCloser: stream, stats: s}
+}
+
+// countingStream counts the bytes read from and written to a stream.
+type countingStream struct {
+	io.ReadWriteCloser
+	stats *serialStats
+}
+
+func (c *countingStream) Read(p []byte) (int, error) {
+	n, err := c.ReadWriteCloser.Read(p)
+	c.stats.rxBytes.Add(uint64(n))
+	return n, err
+}
+
+func (c *countingStream) Write(p []byte) (int, error) {
+	n, err := c.ReadWriteCloser.Write(p)
+	c.stats.txBytes.Add(uint64(n))
+	return n, err
 }
 
 func waitForPort(ctx context.Context, waitPort string) error {

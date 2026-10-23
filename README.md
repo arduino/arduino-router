@@ -84,8 +84,9 @@ This method takes no parameters and returns a map with:
 - `sessions`: the number of reliable link sessions established since the Router started (a new session starts every time the port is opened or the MCU restarts).
 - `current`: the counters of the current reliable link session.
 - `total`: the counters summed over all the reliable link sessions.
+- `rx_bytes`, `tx_bytes`: the bytes of the msgpack-rpc stream received from and sent to the MCU since the Router started. They are counted above the protocol layer, so they are available with both the raw and the reliable protocols.
 
-The counters (`tx_frames`, `tx_data_frames`, `tx_acked_frames`, `tx_acked_bytes`, `tx_naks`, `retransmits`, `retransmit_timeouts`, `rx_frames`, `rx_data_frames`, `rx_data_bytes`, `rx_duplicates`, `rx_out_of_order`, `rx_naks`, `rx_errors`, `rx_crc_errors`, `rx_framing_errors`, `rx_protocol_errors`) are described in `internal/seriallink/link.go`. They are all zero when the raw protocol is used.
+The counters (`tx_frames`, `tx_data_frames`, `tx_acked_frames`, `tx_acked_bytes`, `tx_naks`, `retransmits`, `retransmit_timeouts`, `rx_frames`, `rx_data_frames`, `rx_data_bytes`, `rx_duplicates`, `rx_out_of_order`, `rx_naks`, `rx_errors`, `rx_crc_errors`, `rx_framing_errors`, `rx_protocol_errors`) are described in `internal/seriallink/link.go`. They are all zero when the raw protocol is used, use `rx_bytes` and `tx_bytes` to measure the throughput in that case.
 
 ### `$/setMaxMsgSize <MAX_SIZE_IN_BYTES>` sets the maximum message size allowed by the Router
 

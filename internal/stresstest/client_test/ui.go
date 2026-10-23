@@ -88,6 +88,17 @@ type routerStats struct {
 	Sessions int              `msgpack:"sessions"`
 	Current  seriallink.Stats `msgpack:"current"`
 	Total    seriallink.Stats `msgpack:"total"`
+	RxBytes  uint64           `msgpack:"rx_bytes"`
+	TxBytes  uint64           `msgpack:"tx_bytes"`
+}
+
+// streamBytes returns the msgpack-rpc stream bytes sent to and received from
+// the MCU. Routers not reporting them only count the reliable link bytes.
+func (r *routerStats) streamBytes() (tx, rx uint64) {
+	if r.TxBytes == 0 && r.RxBytes == 0 {
+		return r.Total.TxAckedBytes, r.Total.RxDataBytes
+	}
+	return r.TxBytes, r.RxBytes
 }
 
 // mcuStats is the result of the "stats" method of the test sketch.
@@ -157,7 +168,7 @@ type model struct {
 	latHistory           []float64
 
 	router, routerPrv sample[routerStats]
-	routerBase        seriallink.Stats
+	routerBase        routerStats
 	routerErr         error
 	routerPending     bool
 	routerValid       bool
@@ -351,14 +362,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.routerPrv = m.router
 			} else {
 				m.routerPrv = sample[routerStats]{time: msg.time, v: msg.stats}
-				m.routerBase = msg.stats.Total
+				m.routerBase = msg.stats
 			}
 			m.router = sample[routerStats]{time: msg.time, v: msg.stats}
 			m.routerValid = true
 			dt := m.router.time.Sub(m.routerPrv.time)
-			cur, prv := m.router.v.Total, m.routerPrv.v.Total
-			m.linkTxHistory = pushHistory(m.linkTxHistory, rate(cur.TxAckedBytes, prv.TxAckedBytes, dt))
-			m.linkRxHistory = pushHistory(m.linkRxHistory, rate(cur.RxDataBytes, prv.RxDataBytes, dt))
+			curTx, curRx := m.router.v.streamBytes()
+			prvTx, prvRx := m.routerPrv.v.streamBytes()
+			m.linkTxHistory = pushHistory(m.linkTxHistory, rate(curTx, prvTx, dt))
+			m.linkRxHistory = pushHistory(m.linkRxHistory, rate(curRx, prvRx, dt))
 		}
 
 	case mcuStatsMsg:
@@ -475,7 +487,7 @@ func (m *model) reset() {
 	m.linkRxHistory = nil
 	m.resetAt = now
 	if m.routerValid {
-		m.routerBase = m.router.v.Total
+		m.routerBase = m.router.v
 	}
 	if m.mcuValid {
 		m.mcuBase = m.mcu.v
@@ -756,12 +768,24 @@ func (m *model) viewLink() string {
 		return dimStyle.Render("waiting for stats...")
 	}
 	r := m.router.v
+	dt := m.router.time.Sub(m.routerPrv.time)
 	if r.Protocol != "reliable" && r.Sessions == 0 {
-		return dimStyle.Render(fmt.Sprintf("protocol %q: no link statistics available", r.Protocol))
+		curTx, curRx := r.streamBytes()
+		prvTx, prvRx := m.routerPrv.v.streamBytes()
+		baseTx, baseRx := m.routerBase.streamBytes()
+		stream := func(cur, prv, base uint64) string {
+			return fmt.Sprintf("%-11s %s", fmtBytes(float64(sub(cur, base))),
+				dimStyle.Render(fmtBytes(rate(cur, prv, dt))+"/s"))
+		}
+		return strings.Join([]string{
+			dimStyle.Render(fmt.Sprintf("protocol %q: no link statistics available", r.Protocol)),
+			"",
+			"stream TX (router → MCU)  " + stream(curTx, prvTx, baseTx),
+			"stream RX (MCU → router)  " + stream(curRx, prvRx, baseRx),
+		}, "\n")
 	}
 
-	cur, prv, base := r.Total, m.routerPrv.v.Total, m.routerBase
-	dt := m.router.time.Sub(m.routerPrv.time)
+	cur, prv, base := r.Total, m.routerPrv.v.Total, m.routerBase.Total
 	cell := func(row *linkRow) string {
 		if row == nil {
 			return strings.Repeat(" ", 38)
