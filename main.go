@@ -9,6 +9,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -288,10 +289,11 @@ func startRouter(ctx context.Context, cfg Config) error {
 						BaudRate:    cfg.SerialBaudRate,
 						MaxBaudRate: cfg.SerialMaxBaudRate,
 						SetBaudRate: func(rate int) error {
-							if err := serialPort.Drain(); err != nil {
+							// The Go runtime signals may interrupt the syscalls
+							if err := retryOnEINTR(serialPort.Drain); err != nil {
 								return err
 							}
-							return serialPort.SetMode(serialMode(rate))
+							return retryOnEINTR(func() error { return serialPort.SetMode(serialMode(rate)) })
 						},
 					})
 					if err != nil {
@@ -502,6 +504,15 @@ func waitForPort(ctx context.Context, waitPort string) error {
 					_ = watcher.Add(ev.Name)
 				}
 			}
+		}
+	}
+}
+
+// retryOnEINTR calls f until it does not fail with EINTR.
+func retryOnEINTR(f func() error) error {
+	for {
+		if err := f(); !errors.Is(err, syscall.EINTR) {
+			return err
 		}
 	}
 }
