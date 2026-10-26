@@ -151,3 +151,31 @@ func TestCloseAndReopen(t *testing.T) {
 	b = l.OpenB()
 	require.Equal(t, []byte("in flight"), readAvailable(t, b))
 }
+
+func TestBaudRate(t *testing.T) {
+	l := New(1)
+	a, b := l.OpenA(), l.OpenB()
+	require.Equal(t, DefaultBaudRate, a.BaudRate())
+
+	// Different rates: garbage
+	require.NoError(t, a.SetBaudRate(921600))
+	_, err := a.Write(testData)
+	require.NoError(t, err)
+	got := readAvailable(t, b)
+	require.Len(t, got, len(testData))
+	require.NotEqual(t, testData, got)
+	require.Equal(t, len(testData), l.AtoB().Stats().Mismatched)
+
+	// Same rate: clean
+	require.NoError(t, b.SetBaudRate(921600))
+	_, err = b.Write(testData)
+	require.NoError(t, err)
+	require.Equal(t, testData, readAvailable(t, a))
+
+	// Reopening a port resets its rate
+	require.NoError(t, b.Close())
+	require.Error(t, b.SetBaudRate(115200))
+	b = l.OpenB()
+	require.Equal(t, DefaultBaudRate, b.BaudRate())
+	require.Equal(t, 921600, a.BaudRate())
+}

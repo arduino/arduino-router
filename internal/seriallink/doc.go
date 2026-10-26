@@ -35,12 +35,18 @@
 //	1 DATA     carries stream bytes. seq is meaningful, ack/wnd piggyback the reverse direction.
 //	2 ACK      acknowledgement and window update only (also used as keep-alive).
 //	3 NAK      as ACK, but also asks the sender to go back and retransmit from ack.
-//	4 SYN      session request, payload: max_payload u16 | window u8 | nonce u32
-//	5 SYN_ACK  session accept,  payload: max_payload u16 | window u8 | nonce u32 | echoed_nonce u32
+//	4 SYN      session request, payload: max_payload u16 | window u8 | nonce u32 [| baud_rates u16]
+//	5 SYN_ACK  session accept,  payload: max_payload u16 | window u8 | nonce u32 | echoed_nonce u32 [| baud_rates u16]
 //	6 RST      session abort,   payload: nonce u32
 //
 // All multi-byte integers are little endian. seq/ack/wnd are only meaningful
 // in DATA, ACK and NAK frames.
+//
+// The fields in brackets are optional: a receiver must accept SYN and SYN_ACK
+// payloads with missing optional fields, and ignore any trailing bytes it does
+// not know about, so that new fields can be added in the future. Whatever its
+// max payload, a receiver must accept control frames (SYN, SYN_ACK, RST) with
+// a payload of up to 32 bytes, and a sender must not send larger ones.
 //
 // # Session
 //
@@ -87,4 +93,60 @@
 // update. Idle sides send an ACK every keep-alive interval: this refreshes the
 // window and lets the peer detect a dead link (ErrLinkTimeout) when nothing is
 // received for the link timeout.
+//
+// # Baud rate
+//
+// Every session starts at the base baud rate (115200 by default), the rate
+// the ports are opened at. The two sides can then switch to a faster rate:
+// each one lists the rates it supports in the baud_rates field of its SYN or
+// SYN_ACK, a bit mask where bit i stands for the i-th rate of this table
+// (bits 14 and 15 are reserved and must be 0):
+//
+//	bit  0 115200    bit  5 921600     bit 10 2500000
+//	bit  1 230400    bit  6 1000000    bit 11 3000000
+//	bit  2 460800    bit  7 1152000    bit 12 3500000
+//	bit  3 500000    bit  8 1500000    bit 13 4000000
+//	bit  4 576000    bit  9 2000000
+//
+// A side lists only the rates higher than the base rate that it can generate
+// accurately and that it is configured to accept. The negotiated rate is the
+// highest rate in both masks: both sides compute the same one, so there is
+// nothing more to agree on. If there is none (e.g. the mask is missing), the
+// session stays at the base rate.
+//
+// The switch needs no dedicated messages. An established side at the base
+// rate switches when it receives a valid frame from the peer, which proves
+// that the peer is at the base rate too:
+//
+//  1. it answers with two frames at the base rate (SYN_ACK if the peer may
+//     not be established yet, ACK otherwise), so that the peer switches too
+//     even if one of them is lost;
+//  2. it waits until they have been transmitted, and changes the rate.
+//
+// DATA keeps flowing: the frames lost while the two sides are at different
+// rates are retransmitted as usual. The bytes sent while the rates do not
+// match are received as garbage, that may swallow the next frame up to its
+// delimiter: until the switch is proven, every frame is preceded by an extra
+// 0x00 (an empty frame, ignored by the receiver) that ends the garbage.
+//
+// The switch is proven when a valid frame is received at least one
+// retransmission timeout after changing the rate: the frames received
+// earlier may have been sent by the peer at the base rate, and read late from
+// the port buffers.
+//
+// A side at the negotiated rate that receives no valid frame for two
+// keep-alive intervals goes back to the base rate (and sends an ACK there,
+// which makes a peer at the base rate start a new attempt). If the switch was
+// not proven yet, the attempt failed: either the peer did not switch (the
+// answers were lost) or the rate does not work. After 5 failed attempts in a
+// row the rate is considered not working: the side resets the session (RST).
+// The rate is not lowered automatically, so the next sessions fail the same
+// way: a link that works only some of the time would hide the problem, the
+// maximum rate must be lowered by configuration instead.
+//
+// If the switch was proven, either the line is down (and the link timeout
+// applies as usual) or the peer restarted at the base rate, and its SYN must
+// be heard to reset the session quickly. While at the base rate the side
+// switches again at the next valid frame, as above. When a session ends both
+// sides return to the base rate.
 package seriallink

@@ -29,7 +29,16 @@ var (
 	ErrSessionReset = errors.New("seriallink: session reset by peer")
 	// ErrLinkTimeout is returned when the peer stopped responding.
 	ErrLinkTimeout = errors.New("seriallink: link timeout")
+	// ErrBaudRate is returned when the session has been reset because the
+	// negotiated baud rate does not work. The rate is not lowered
+	// automatically: the next sessions will fail the same way until
+	// MaxBaudRate (on either side) is lowered.
+	ErrBaudRate = errors.New("seriallink: negotiated baud rate not working")
 )
+
+// maxBaudRateFailures is the number of failed attempts to switch to the
+// negotiated baud rate after which the session is reset.
+const maxBaudRateFailures = 5
 
 // Config contains the link parameters. Zero values are replaced by defaults.
 type Config struct {
@@ -56,6 +65,18 @@ type Config struct {
 	// LinkTimeout is the time without receiving anything from the peer after
 	// which the link is declared dead (default 4s).
 	LinkTimeout time.Duration
+
+	// BaudRate is the baud rate of the port when the Link is created: every
+	// session starts at this rate, and falls back to it if the negotiated
+	// rate does not work (default 115200).
+	BaudRate int
+	// MaxBaudRate is the maximum baud rate that can be negotiated with the
+	// peer. If 0 (the default) the baud rate is not negotiated.
+	MaxBaudRate int
+	// SetBaudRate changes the baud rate of the port. It must wait until all
+	// the data written so far has been transmitted (e.g. calling Drain on a
+	// go.bug.st/serial port). Required if MaxBaudRate is set.
+	SetBaudRate func(rate int) error
 }
 
 func (c *Config) setDefaults() error {
@@ -79,6 +100,12 @@ func (c *Config) setDefaults() error {
 	}
 	if c.LinkTimeout == 0 {
 		c.LinkTimeout = 4 * time.Second
+	}
+	if c.BaudRate == 0 {
+		c.BaudRate = 115200
+	}
+	if c.MaxBaudRate > 0 && c.SetBaudRate == nil {
+		return errors.New("seriallink: SetBaudRate is required to negotiate the baud rate")
 	}
 	if c.MaxPayload < 1 || c.MaxPayload > MaxPayloadLimit {
 		return fmt.Errorf("seriallink: invalid max payload %d (must be 1..%d)", c.MaxPayload, MaxPayloadLimit)
@@ -111,6 +138,9 @@ type Stats struct {
 	RxCRCErrors        uint64 `msgpack:"rx_crc_errors"`       // frames with a CRC mismatch
 	RxFramingErrors    uint64 `msgpack:"rx_framing_errors"`   // frames with a bad COBS encoding, too short or too long
 	RxProtocolErrors   uint64 `msgpack:"rx_protocol_errors"`  // frames with an unknown protocol version or frame type
+	BaudRateSwitches   uint64 `msgpack:"baud_rate_switches"`  // proven switches to the negotiated baud rate
+	BaudRateFailures   uint64 `msgpack:"baud_rate_failures"`  // failed attempts to switch to the negotiated baud rate
+	BaudRateFallbacks  uint64 `msgpack:"baud_rate_fallbacks"` // fallbacks to the base rate after a silence at the proven negotiated rate
 }
 
 // Add adds the counters of o to s.
@@ -132,6 +162,9 @@ func (s *Stats) Add(o Stats) {
 	s.RxCRCErrors += o.RxCRCErrors
 	s.RxFramingErrors += o.RxFramingErrors
 	s.RxProtocolErrors += o.RxProtocolErrors
+	s.BaudRateSwitches += o.BaudRateSwitches
+	s.BaudRateFailures += o.BaudRateFailures
+	s.BaudRateFallbacks += o.BaudRateFallbacks
 }
 
 type linkState int
@@ -140,6 +173,14 @@ const (
 	stateConnecting linkState = iota
 	stateEstablished
 	stateClosed
+)
+
+// baudPhase is the state of the switch to the negotiated baud rate.
+type baudPhase int
+
+const (
+	baudBase baudPhase = iota // at the base rate
+	baudFast                  // at the negotiated rate (or switching to it)
 )
 
 // Link is a reliable byte stream over an unreliable serial port.
@@ -172,6 +213,14 @@ type Link struct {
 	rtoStart   time.Time // retransmission timer start
 	lastTx     time.Time
 	lastRst    time.Time
+
+	// baud rate negotiation
+	baudTarget     int       // negotiated rate, 0 if none
+	baudPhase      baudPhase //
+	baudSwitchedAt time.Time // baudFast: when the port switched to the negotiated rate, zero if not yet
+	baudProven     bool      // baudFast: the peer has been heard at the negotiated rate
+	baudFailures   int       // consecutive failed switches
+	baudRate       int       // current port rate
 
 	// receiver
 	recvBuf    bytes.Buffer
@@ -207,6 +256,7 @@ func New(port io.ReadWriteCloser, cfg Config) (*Link, error) {
 		nonce:       newNonce(),
 		maxPayload:  cfg.MaxPayload,
 		recvCap:     cfg.Window * cfg.MaxPayload,
+		baudRate:    cfg.BaudRate,
 		synDeadline: now,
 		lastTx:      now,
 		lastRx:      now,
@@ -293,6 +343,13 @@ func (l *Link) Done() <-chan struct{} {
 	return l.done
 }
 
+// BaudRate returns the current baud rate of the port.
+func (l *Link) BaudRate() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.baudRate
+}
+
 // Stats returns the link counters.
 func (l *Link) Stats() Stats {
 	l.mu.Lock()
@@ -345,7 +402,12 @@ func (l *Link) rstFrame() frame {
 }
 
 func (l *Link) localParams() synParams {
-	return synParams{maxPayload: l.cfg.MaxPayload, window: l.cfg.Window, nonce: l.nonce}
+	return synParams{
+		maxPayload: l.cfg.MaxPayload,
+		window:     l.cfg.Window,
+		nonce:      l.nonce,
+		baudRates:  baudRateMask(l.cfg.BaudRate, l.cfg.MaxBaudRate),
+	}
 }
 
 // recvCredit returns how many full DATA frames we can still buffer. Must be
@@ -369,6 +431,16 @@ func (l *Link) retransmit() {
 		return
 	}
 	// Drop the DATA frames already in the queue: they are queued again below
+	l.dropQueuedData()
+	for _, f := range l.unacked {
+		l.enqueue(f)
+	}
+	l.stats.Retransmits += uint64(len(l.unacked))
+}
+
+// dropQueuedData removes the DATA frames from the output queue (they are
+// still in unacked). Must be called with l.mu held.
+func (l *Link) dropQueuedData() {
 	q := l.outq[:0]
 	for _, f := range l.outq {
 		if f.typ != frameData {
@@ -377,10 +449,6 @@ func (l *Link) retransmit() {
 	}
 	l.outq = q
 	l.queuedData = 0
-	for _, f := range l.unacked {
-		l.enqueue(f)
-	}
-	l.stats.Retransmits += uint64(len(l.unacked))
 }
 
 // isAcked returns true if the DATA frame with the given seq has already been
@@ -404,6 +472,10 @@ func (l *Link) sendLoop() {
 		}
 		f := l.outq[0]
 		l.outq = l.outq[1:]
+		if f.typ == frameSetBaud {
+			l.applyBaudRate(f.baud)
+			continue
+		}
 		switch f.typ {
 		case frameData:
 			l.queuedData--
@@ -419,9 +491,15 @@ func (l *Link) sendLoop() {
 		}
 		now := time.Now()
 		l.lastTx = now
+		buf = buf[:0]
+		if l.baudTarget != 0 && (l.baudPhase != baudFast || !l.baudProven) {
+			// The peer may have received garbage while the rates did not
+			// match: a delimiter in front ends it, so this frame is not lost
+			buf = append(buf, 0)
+		}
 		l.mu.Unlock()
 
-		buf = f.appendEncoded(buf[:0])
+		buf = f.appendEncoded(buf)
 		_, err := l.port.Write(buf)
 
 		l.mu.Lock()
@@ -438,9 +516,26 @@ func (l *Link) sendLoop() {
 	}
 }
 
+// applyBaudRate changes the port baud rate. Must be called by the sender
+// goroutine with l.mu held.
+func (l *Link) applyBaudRate(rate int) {
+	l.mu.Unlock()
+	err := l.cfg.SetBaudRate(rate)
+	l.mu.Lock()
+	if err != nil {
+		l.terminate(fmt.Errorf("seriallink: setting baud rate %d: %w", rate, err), false)
+		return
+	}
+	l.baudRate = rate
+	if l.baudPhase == baudFast && rate == l.baudTarget {
+		l.baudSwitchedAt = time.Now()
+	}
+	l.wake()
+}
+
 func (l *Link) readLoop() {
 	defer close(l.readerDone)
-	maxEncoded := maxEncodedFrameSize(l.cfg.MaxPayload)
+	maxEncoded := maxEncodedFrameSize(max(l.cfg.MaxPayload, controlPayloadLimit))
 	buf := make([]byte, 1024)
 	acc := make([]byte, 0, maxEncoded)
 	discarding := false
@@ -500,6 +595,13 @@ func (l *Link) receive(encoded []byte, discarded bool) {
 
 // handleFrame processes a valid incoming frame. Must be called with l.mu held.
 func (l *Link) handleFrame(f frame, now time.Time) {
+	l.handleSessionFrame(f, now)
+	if l.state == stateEstablished {
+		l.onValidFrameBaud(now)
+	}
+}
+
+func (l *Link) handleSessionFrame(f frame, now time.Time) {
 	switch l.state {
 	case stateConnecting:
 		switch f.typ {
@@ -567,7 +669,8 @@ func (l *Link) establish(now time.Time) {
 	l.sendWindow = min(l.cfg.Window, l.peer.window)
 	l.peerWnd = l.peer.window
 	l.lastRx = now
-	slog.Debug("Serial link established", "max_payload", l.maxPayload, "window", l.sendWindow)
+	l.baudTarget = highestBaudRate(baudRateMask(l.cfg.BaudRate, l.cfg.MaxBaudRate) & l.peer.baudRates)
+	slog.Debug("Serial link established", "max_payload", l.maxPayload, "window", l.sendWindow, "baud_rate", l.baudTarget)
 	l.cond.Broadcast()
 }
 
@@ -671,11 +774,20 @@ func (l *Link) onTimer(now time.Time) time.Time {
 		}
 		consider(l.lastRx.Add(l.cfg.LinkTimeout))
 
+		if d, ok := l.onTimerBaud(now); !ok {
+			return next
+		} else if !d.IsZero() {
+			consider(d)
+		}
+
 		if len(l.unacked) > 0 && l.queuedData == 0 {
 			rto := l.rtoStart.Add(l.cfg.RetransmitTimeout)
 			if !now.Before(rto) {
 				l.stats.RetransmitTimeouts++
-				l.retries++
+				if l.baudPhase != baudFast || l.baudProven {
+					// While switching, the silence fallback bounds the retries
+					l.retries++
+				}
 				if l.retries > l.cfg.MaxRetries {
 					l.terminate(ErrLinkTimeout, true)
 					return next

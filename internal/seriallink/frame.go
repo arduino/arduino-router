@@ -23,6 +23,12 @@ const (
 	// MaxWindowLimit is the maximum window supported by the protocol (Go-Back-N
 	// requires the window to be smaller than half the sequence number space).
 	MaxWindowLimit = 127
+
+	// controlPayloadLimit is the payload size that every implementation must
+	// be able to receive, whatever its max payload: the payload of the
+	// control frames (SYN, SYN_ACK, RST), including future extensions, must
+	// not exceed it.
+	controlPayloadLimit = 32
 )
 
 type frameType uint8
@@ -34,6 +40,10 @@ const (
 	frameSyn    frameType = 4
 	frameSynAck frameType = 5
 	frameRst    frameType = 6
+
+	// frameSetBaud is not a real frame: queued among the frames, it tells
+	// the sender to change the port baud rate after sending the previous ones.
+	frameSetBaud frameType = 0xFF
 )
 
 func (t frameType) String() string {
@@ -61,6 +71,7 @@ type frame struct {
 	ack     uint8
 	wnd     uint8
 	payload []byte
+	baud    int // frameSetBaud only
 }
 
 var (
@@ -127,13 +138,47 @@ func decodeFrame(encoded []byte) (frame, error) {
 	return f, nil
 }
 
+// baudRates are the baud rates that can be negotiated: bit i of a baud rate
+// mask stands for baudRates[i]. Bits 14 and 15 are reserved.
+var baudRates = [...]int{
+	115200, 230400, 460800, 500000, 576000, 921600, 1000000,
+	1152000, 1500000, 2000000, 2500000, 3000000, 3500000, 4000000,
+}
+
+// baudRateMask returns the mask of the rates r with base < r <= maxRate.
+func baudRateMask(base, maxRate int) uint16 {
+	var mask uint16
+	for i, r := range baudRates {
+		if r > base && r <= maxRate {
+			mask |= 1 << i
+		}
+	}
+	return mask
+}
+
+// highestBaudRate returns the highest rate in mask, 0 if mask is empty.
+func highestBaudRate(mask uint16) int {
+	for i := len(baudRates) - 1; i >= 0; i-- {
+		if mask&(1<<i) != 0 {
+			return baudRates[i]
+		}
+	}
+	return 0
+}
+
 // synParams are the session parameters exchanged in SYN and SYN_ACK frames.
 type synParams struct {
 	maxPayload int
 	window     int
 	nonce      uint32
 	echo       uint32 // only in SYN_ACK
+	baudRates  uint16 // optional, omitted if 0
 }
+
+const (
+	synSize    = 7
+	synAckSize = 11
+)
 
 func (p synParams) marshal(withEcho bool) []byte {
 	b := binary.LittleEndian.AppendUint16(nil, uint16(p.maxPayload))
@@ -142,15 +187,20 @@ func (p synParams) marshal(withEcho bool) []byte {
 	if withEcho {
 		b = binary.LittleEndian.AppendUint32(b, p.echo)
 	}
+	if p.baudRates != 0 {
+		b = binary.LittleEndian.AppendUint16(b, p.baudRates)
+	}
 	return b
 }
 
+// parseSynParams parses a SYN or SYN_ACK payload. Optional fields may be
+// missing, and unknown trailing bytes are ignored (future extensions).
 func parseSynParams(b []byte, withEcho bool) (synParams, bool) {
-	size := 7
+	size := synSize
 	if withEcho {
-		size = 11
+		size = synAckSize
 	}
-	if len(b) != size {
+	if len(b) < size {
 		return synParams{}, false
 	}
 	p := synParams{
@@ -160,6 +210,9 @@ func parseSynParams(b []byte, withEcho bool) (synParams, bool) {
 	}
 	if withEcho {
 		p.echo = binary.LittleEndian.Uint32(b[7:11])
+	}
+	if len(b) >= size+2 {
+		p.baudRates = binary.LittleEndian.Uint16(b[size:]) & 0x3FFF
 	}
 	if p.maxPayload < 1 || p.maxPayload > MaxPayloadLimit || p.window < 1 || p.window > MaxWindowLimit {
 		return synParams{}, false

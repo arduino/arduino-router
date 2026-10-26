@@ -50,6 +50,7 @@ type Config struct {
 	AfterReadyCommand string
 	SerialPortAddr    string
 	SerialBaudRate    int
+	SerialMaxBaudRate int
 	SerialProtocol    string
 	MonitorPortAddr   string
 }
@@ -81,6 +82,7 @@ func main() {
 	cmd.Flags().StringVar(&cfg.AfterReadyCommand, "after-ready", "", "Execute a command after the router is ready)")
 	cmd.Flags().StringVarP(&cfg.SerialPortAddr, "serial-port", "p", "", "Serial port address")
 	cmd.Flags().IntVarP(&cfg.SerialBaudRate, "serial-baudrate", "b", 115200, "Serial port baud rate")
+	cmd.Flags().IntVar(&cfg.SerialMaxBaudRate, "serial-max-baudrate", 0, "Maximum baud rate negotiated with the MCU, after starting at --serial-baudrate (only with the reliable protocol, 0 to disable the negotiation)")
 	cmd.Flags().StringVar(&cfg.SerialProtocol, "serial-protocol", "auto", "Serial port protocol: 'raw' (plain msgpack-rpc), 'reliable' (msgpack-rpc over a framed link with integrity check, retransmission and flow control) or 'auto' (detect the protocol used by the MCU)")
 	cmd.Flags().StringVarP(&cfg.MonitorPortAddr, "monitor-port", "m", "127.0.0.1:7500", "Listening port for MCU monitor proxy")
 	cmd.AddCommand(&cobra.Command{
@@ -252,6 +254,14 @@ func startRouter(ctx context.Context, cfg Config) error {
 			res(stats.get(), nil)
 		})
 		f.Assert(err == nil, "Failed to register $/serial/stats method")
+		serialMode := func(baudRate int) *serial.Mode {
+			return &serial.Mode{
+				BaudRate: baudRate,
+				DataBits: 8,
+				StopBits: serial.OneStopBit,
+				Parity:   serial.NoParity,
+			}
+		}
 		go func() {
 			for {
 				serialOpened.L.Lock()
@@ -263,12 +273,7 @@ func startRouter(ctx context.Context, cfg Config) error {
 				serialOpened.L.Unlock()
 
 				slog.Debug("Opening serial connection", "serial", cfg.SerialPortAddr)
-				serialPort, err := serial.Open(cfg.SerialPortAddr, &serial.Mode{
-					BaudRate: cfg.SerialBaudRate,
-					DataBits: 8,
-					StopBits: serial.OneStopBit,
-					Parity:   serial.NoParity,
-				})
+				serialPort, err := serial.Open(cfg.SerialPortAddr, serialMode(cfg.SerialBaudRate))
 				if err != nil {
 					slog.Debug("Failed to open serial port. Wait for it...", "serial", cfg.SerialPortAddr, "err", err)
 					if err := waitForPort(ctx, cfg.SerialPortAddr); err != nil {
@@ -279,7 +284,16 @@ func startRouter(ctx context.Context, cfg Config) error {
 				}
 				slog.Info("Opened serial connection", "serial", cfg.SerialPortAddr, "protocol", cfg.SerialProtocol)
 				newReliable := func(port io.ReadWriteCloser) (io.ReadWriteCloser, error) {
-					link, err := seriallink.New(port, seriallink.Config{})
+					link, err := seriallink.New(port, seriallink.Config{
+						BaudRate:    cfg.SerialBaudRate,
+						MaxBaudRate: cfg.SerialMaxBaudRate,
+						SetBaudRate: func(rate int) error {
+							if err := serialPort.Drain(); err != nil {
+								return err
+							}
+							return serialPort.SetMode(serialMode(rate))
+						},
+					})
 					if err != nil {
 						return nil, err
 					}

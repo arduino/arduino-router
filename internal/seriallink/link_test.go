@@ -310,3 +310,17 @@ func TestPeerRebootSameNonce(t *testing.T) {
 	a = newLink(t, l.OpenA())
 	exchange(t, a, b, 10000)
 }
+
+func TestTinyMaxPayload(t *testing.T) {
+	// The control frames are larger than the max payload
+	l := noisyline.New(1)
+	cfg := testConfig
+	cfg.MaxPayload = 1
+	a, err := New(l.OpenA(), cfg)
+	require.NoError(t, err)
+	defer a.Close()
+	b, err := New(l.OpenB(), cfg)
+	require.NoError(t, err)
+	defer b.Close()
+	exchange(t, a, b, 1000)
+}
