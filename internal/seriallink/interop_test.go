@@ -16,7 +16,10 @@ package seriallink
 // The tests are skipped if SERIALLINK_PEER is not set.
 
 import (
+	"bufio"
 	"bytes"
+	"encoding/binary"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -85,10 +88,48 @@ func startCppPeer(t *testing.T, line *noisyline.Line, args ...string) *cppPeer {
 	}()
 	go func() {
 		defer close(p.stdoutDone)
-		_, _ = io.Copy(p.port, stdout)
+		if slices.Contains(args, "--max-baud") {
+			if err := copyRecords(p.port, stdout); err != nil {
+				t.Log(err)
+			}
+		} else {
+			_, _ = io.Copy(p.port, stdout)
+		}
 	}()
 	t.Cleanup(p.kill)
 	return p
+}
+
+// copyRecords copies the peer output to the port, applying the baud rate
+// changes in order with the data (see the record format in seriallink_peer.cpp).
+func copyRecords(port *noisyline.Port, r io.Reader) error {
+	br := bufio.NewReader(r)
+	for {
+		typ, err := br.ReadByte()
+		if err != nil {
+			return nil
+		}
+		switch typ {
+		case 'D':
+			var n uint16
+			if err := binary.Read(br, binary.LittleEndian, &n); err != nil {
+				return err
+			}
+			if _, err := io.CopyN(port, br, int64(n)); err != nil {
+				return err
+			}
+		case 'B':
+			var rate uint32
+			if err := binary.Read(br, binary.LittleEndian, &rate); err != nil {
+				return err
+			}
+			if err := port.SetBaudRate(int(rate)); err != nil {
+				return err
+			}
+		default:
+			return fmt.Errorf("peer output: unknown record type %q", typ)
+		}
+	}
 }
 
 // kill terminates the peer abruptly, like an MCU reset.
@@ -269,4 +310,123 @@ func TestInteropLinkTimeout(t *testing.T) {
 	require.NoError(t, a.Close())
 	a = newLink(t, line.OpenA())
 	echo(t, a, 10000)
+}
+
+func newBaudLinkInterop(t *testing.T, p *noisyline.Port, maxBaud int) *Link {
+	cfg := testConfig
+	cfg.MaxBaudRate = maxBaud
+	cfg.SetBaudRate = p.SetBaudRate
+	l, err := New(p, cfg)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = l.Close() })
+	return l
+}
+
+// requireInteropBaudRate waits until the Go side is at the given rate, and
+// checks that data goes through.
+func requireInteropBaudRate(t *testing.T, line *noisyline.Line, pa *noisyline.Port, a *Link, rate int) {
+	require.Eventually(t, func() bool {
+		return a.BaudRate() == rate && a.Stats().BaudRateSwitches > 0
+	}, 2*time.Second, time.Millisecond)
+	require.Equal(t, rate, pa.BaudRate())
+	echo(t, a, 10000)
+	require.Equal(t, rate, pa.BaudRate())
+}
+
+func TestInteropBaudRate(t *testing.T) {
+	line := noisyline.New(1)
+	startCppPeer(t, line, "--max-baud", "921600")
+	pa := line.OpenA()
+	a := newBaudLinkInterop(t, pa, 2000000)
+	echo(t, a, 256*1024) // data written during the switch is held
+	requireInteropBaudRate(t, line, pa, a, 921600)
+	require.Zero(t, a.Stats().BaudRateFailures)
+	require.NotZero(t, line.AtoB().Stats().Bytes)
+}
+
+func TestInteropBaudRateNotNegotiated(t *testing.T) {
+	// The peer does not negotiate (no baud rate mask)
+	line := noisyline.New(1)
+	startCppPeer(t, line)
+	pa := line.OpenA()
+	a := newBaudLinkInterop(t, pa, 2000000)
+	echo(t, a, 64*1024)
+	require.Equal(t, 115200, pa.BaudRate())
+	require.Zero(t, a.Stats().BaudRateSwitches)
+}
+
+func TestInteropBaudRateNoisyLine(t *testing.T) {
+	line := noisyline.New(1)
+	line.SetFaults(testFaults)
+	startCppPeer(t, line, "--max-baud", "1000000")
+	pa := line.OpenA()
+	a := newBaudLinkInterop(t, pa, 1000000)
+	echo(t, a, 64*1024)
+	requireInteropBaudRate(t, line, pa, a, 1000000)
+	t.Logf("Go side: %+v", a.Stats())
+}
+
+func TestInteropBaudRatePeerReboot(t *testing.T) {
+	line := noisyline.New(1)
+	p := startCppPeer(t, line, "--max-baud", "921600")
+	pa := line.OpenA()
+	a := newBaudLinkInterop(t, pa, 921600)
+	requireInteropBaudRate(t, line, pa, a, 921600)
+
+	// The MCU resets, back at the base rate: the router must notice it
+	// before the link timeout...
+	p.kill()
+	start := time.Now()
+	startCppPeer(t, line, "--max-baud", "921600")
+	_, err := a.Read(make([]byte, 10))
+	require.ErrorIs(t, err, ErrSessionReset)
+	require.Less(t, time.Since(start), testConfig.LinkTimeout)
+
+	// ...and open a new link
+	require.NoError(t, a.Close())
+	pa = line.OpenA()
+	a = newBaudLinkInterop(t, pa, 921600)
+	requireInteropBaudRate(t, line, pa, a, 921600)
+}
+
+func TestInteropBaudRateRouterRestart(t *testing.T) {
+	line := noisyline.New(1)
+	startCppPeer(t, line, "--max-baud", "921600")
+	pa := line.OpenA()
+	a := newBaudLinkInterop(t, pa, 921600)
+	requireInteropBaudRate(t, line, pa, a, 921600)
+
+	// The router closes the link (the RST is sent at the negotiated rate) and
+	// reopens the port at the base rate: the MCU must follow
+	require.NoError(t, a.Close())
+	pa = line.OpenA()
+	a = newBaudLinkInterop(t, pa, 921600)
+	requireInteropBaudRate(t, line, pa, a, 921600)
+
+	// Same, without being able to notify the MCU
+	line.AtoB().SetBlackhole(true)
+	require.NoError(t, a.Close())
+	line.AtoB().SetBlackhole(false)
+	pa = line.OpenA()
+	a = newBaudLinkInterop(t, pa, 921600)
+	requireInteropBaudRate(t, line, pa, a, 921600)
+}
+
+func TestInteropBaudRateBroken(t *testing.T) {
+	// The MCU can not generate the negotiated rate: every session fails...
+	line := noisyline.New(1)
+	startCppPeer(t, line, "--max-baud", "921600", "--broken-baud", "921600")
+	for range 2 {
+		pa := line.OpenA()
+		a := newBaudLinkInterop(t, pa, 921600)
+		_, err := a.Read(make([]byte, 10))
+		require.Error(t, err)
+		require.NotZero(t, a.Stats().BaudRateFailures)
+		require.NoError(t, a.Close())
+	}
+
+	// ...until the max rate is lowered
+	pa := line.OpenA()
+	a := newBaudLinkInterop(t, pa, 576000)
+	requireInteropBaudRate(t, line, pa, a, 576000)
 }
