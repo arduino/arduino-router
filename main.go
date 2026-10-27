@@ -83,7 +83,7 @@ func main() {
 	cmd.Flags().StringVar(&cfg.AfterReadyCommand, "after-ready", "", "Execute a command after the router is ready)")
 	cmd.Flags().StringVarP(&cfg.SerialPortAddr, "serial-port", "p", "", "Serial port address")
 	cmd.Flags().IntVarP(&cfg.SerialBaudRate, "serial-baudrate", "b", 115200, "Serial port baud rate")
-	cmd.Flags().IntVar(&cfg.SerialMaxBaudRate, "serial-max-baudrate", 0, "Maximum baud rate negotiated with the MCU, after starting at --serial-baudrate (only with the reliable protocol, 0 to disable the negotiation)")
+	cmd.Flags().IntVar(&cfg.SerialMaxBaudRate, "serial-max-baudrate", 1000000, "Maximum baud rate negotiated with the MCU, after starting at --serial-baudrate (only with the reliable protocol, 0 to disable the negotiation)")
 	cmd.Flags().StringVar(&cfg.SerialProtocol, "serial-protocol", "auto", "Serial port protocol: 'raw' (plain msgpack-rpc), 'reliable' (msgpack-rpc over a framed link with integrity check, retransmission and flow control) or 'auto' (detect the protocol used by the MCU)")
 	cmd.Flags().StringVarP(&cfg.MonitorPortAddr, "monitor-port", "m", "127.0.0.1:7500", "Listening port for MCU monitor proxy")
 	cmd.AddCommand(&cobra.Command{
