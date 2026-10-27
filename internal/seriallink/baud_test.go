@@ -53,7 +53,7 @@ func TestBaudRateNegotiation(t *testing.T) {
 	pa, pb := l.OpenA(), l.OpenB()
 	a, b := newBaudLink(t, pa, 2000000), newBaudLink(t, pb, 921600)
 
-	// Writes start right away: the data written during the switch is held
+	// Writes start right away: what is lost during the switch is retransmitted
 	exchange(t, a, b, 256*1024)
 	requireBaudRate(t, 921600, pa, pb, a, b)
 	for _, st := range []Stats{a.Stats(), b.Stats()} {

@@ -492,9 +492,7 @@ func (l *Link) sendLoop() {
 		now := time.Now()
 		l.lastTx = now
 		buf = buf[:0]
-		if l.baudTarget != 0 && (l.baudPhase != baudFast || !l.baudProven) {
-			// The peer may have received garbage while the rates did not
-			// match: a delimiter in front ends it, so this frame is not lost
+		if l.needsDelimiter(now) {
 			buf = append(buf, 0)
 		}
 		l.mu.Unlock()

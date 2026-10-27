@@ -27,6 +27,18 @@ func (l *Link) baudProofDelay() time.Duration {
 	return l.cfg.RetransmitTimeout
 }
 
+// needsDelimiter returns true if the next frame must be preceded by an extra
+// 0x00: the peer may have received garbage while the rates did not match,
+// and the delimiter ends it, so this frame is not lost (the receiver ignores
+// empty frames). It is needed until both sides are surely at the same rate,
+// that is until the switch is proven and the peer, that may have been proven
+// earlier, had the time to fall back if it was not. Must be called with l.mu
+// held.
+func (l *Link) needsDelimiter(now time.Time) bool {
+	return l.baudTarget != 0 && (l.baudPhase != baudFast || !l.baudProven ||
+		now.Sub(l.baudSwitchedAt) < l.baudSilenceTimeout())
+}
+
 // onValidFrameBaud is called after a valid frame has been processed in the
 // established state. Must be called with l.mu held.
 func (l *Link) onValidFrameBaud(now time.Time) {

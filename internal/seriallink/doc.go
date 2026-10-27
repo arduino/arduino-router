@@ -126,8 +126,11 @@
 // DATA keeps flowing: the frames lost while the two sides are at different
 // rates are retransmitted as usual. The bytes sent while the rates do not
 // match are received as garbage, that may swallow the next frame up to its
-// delimiter: until the switch is proven, every frame is preceded by an extra
-// 0x00 (an empty frame, ignored by the receiver) that ends the garbage.
+// delimiter: every frame is preceded by an extra 0x00 (an empty frame,
+// ignored by the receiver) that ends the garbage, while at the base rate,
+// until the switch is proven, and for two keep-alive intervals after
+// changing the rate (the peer may have been proven earlier, and needs that
+// time to fall back if it was not).
 //
 // The switch is proven when a valid frame is received at least one
 // retransmission timeout after changing the rate: the frames received
