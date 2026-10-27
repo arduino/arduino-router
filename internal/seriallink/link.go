@@ -492,7 +492,7 @@ func (l *Link) sendLoop() {
 		now := time.Now()
 		l.lastTx = now
 		buf = buf[:0]
-		if l.needsDelimiter(now) {
+		if l.needsDelimiter() {
 			buf = append(buf, 0)
 		}
 		l.mu.Unlock()
@@ -807,7 +807,7 @@ func (l *Link) onTimer(now time.Time) time.Time {
 			}
 		}
 		if len(l.outq) == 0 {
-			ka := l.lastTx.Add(l.cfg.KeepAliveInterval)
+			ka := l.lastTx.Add(l.keepAliveInterval(now))
 			if !now.Before(ka) {
 				l.enqueueAck()
 			} else {

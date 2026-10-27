@@ -14,29 +14,47 @@ import (
 // Baud rate negotiation, see "Baud rate" in doc.go.
 
 // baudSilenceTimeout is how long a side at the negotiated rate tolerates not
-// receiving any valid frame before falling back to the base rate.
+// receiving any valid frame before falling back to the base rate: until the
+// switch is proven the keep-alive frames are sent every half retransmission
+// timeout, so a failed switch is detected quickly, then a lost keep-alive
+// frame must be tolerated.
 func (l *Link) baudSilenceTimeout() time.Duration {
-	return 2 * l.cfg.KeepAliveInterval
+	if !l.baudProven {
+		return 2 * l.cfg.RetransmitTimeout
+	}
+	return 2*l.cfg.KeepAliveInterval + l.cfg.RetransmitTimeout
+}
+
+// keepAliveInterval is the interval of the keep-alive frames. Shortly after a
+// switch they are sent every half retransmission timeout: until the switch is
+// proven on both sides (the peer may be proven later), and while a peer that
+// did not switch may fall back.
+func (l *Link) keepAliveInterval(now time.Time) time.Duration {
+	if l.baudPhase == baudFast && (!l.baudProven || now.Sub(l.baudSwitchedAt) < 5*l.cfg.RetransmitTimeout) {
+		return max(l.cfg.RetransmitTimeout/2, time.Millisecond)
+	}
+	return l.cfg.KeepAliveInterval
 }
 
 // baudProofDelay is how long after the switch a valid frame must be
-// received to prove that the negotiated rate works: the frames received
-// earlier may have been sent at the base rate, before the peer switched, and
-// read late from the port buffers.
+// received to prove that the negotiated rate works in both directions: a peer
+// that does not receive our frames falls back to the base rate after the
+// silence timeout (plus a margin, because it may have switched a bit later),
+// while a peer still at the negotiated rate after that time hears us. The
+// frames received earlier only prove that we hear the peer, or may even have
+// been sent at the base rate before the peer switched, and read late from the
+// port buffers.
 func (l *Link) baudProofDelay() time.Duration {
-	return l.cfg.RetransmitTimeout
+	return 3 * l.cfg.RetransmitTimeout
 }
 
 // needsDelimiter returns true if the next frame must be preceded by an extra
 // 0x00: the peer may have received garbage while the rates did not match,
 // and the delimiter ends it, so this frame is not lost (the receiver ignores
-// empty frames). It is needed until both sides are surely at the same rate,
-// that is until the switch is proven and the peer, that may have been proven
-// earlier, had the time to fall back if it was not. Must be called with l.mu
-// held.
-func (l *Link) needsDelimiter(now time.Time) bool {
-	return l.baudTarget != 0 && (l.baudPhase != baudFast || !l.baudProven ||
-		now.Sub(l.baudSwitchedAt) < l.baudSilenceTimeout())
+// empty frames). It is needed until the switch is proven. Must be called with
+// l.mu held.
+func (l *Link) needsDelimiter() bool {
+	return l.baudTarget != 0 && (l.baudPhase != baudFast || !l.baudProven)
 }
 
 // onValidFrameBaud is called after a valid frame has been processed in the

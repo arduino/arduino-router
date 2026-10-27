@@ -198,8 +198,8 @@ func TestBaudRateBroken(t *testing.T) {
 }
 
 func TestBaudRateBrokenOneWay(t *testing.T) {
-	// At the negotiated rate only A->B works: B confirms the switch, A does
-	// not. The session must fail anyway.
+	// At the negotiated rate only A->B works: B hears A, but the switch must
+	// not be proven on either side, and the session must fail.
 	l := noisyline.New(1)
 	pa, pb := l.OpenA(), l.OpenB()
 	cfgA := baudConfig(pa, 921600)
@@ -209,7 +209,8 @@ func TestBaudRateBrokenOneWay(t *testing.T) {
 	}
 	a, b := newLinkWithConfig(t, pa, cfgA), newBaudLink(t, pb, 921600)
 	requireBaudRateFailure(t, a, b)
-	require.NotZero(t, b.Stats().BaudRateSwitches)
+	require.Zero(t, a.Stats().BaudRateSwitches)
+	require.Zero(t, b.Stats().BaudRateSwitches)
 }
 
 func TestBaudRateConfig(t *testing.T) {

@@ -126,30 +126,35 @@
 // DATA keeps flowing: the frames lost while the two sides are at different
 // rates are retransmitted as usual. The bytes sent while the rates do not
 // match are received as garbage, that may swallow the next frame up to its
-// delimiter: every frame is preceded by an extra 0x00 (an empty frame,
-// ignored by the receiver) that ends the garbage, while at the base rate,
-// until the switch is proven, and for two keep-alive intervals after
-// changing the rate (the peer may have been proven earlier, and needs that
-// time to fall back if it was not).
+// delimiter: while at the base rate and until the switch is proven, every
+// frame is preceded by an extra 0x00 (an empty frame, ignored by the
+// receiver) that ends the garbage.
 //
-// The switch is proven when a valid frame is received at least one
-// retransmission timeout after changing the rate: the frames received
-// earlier may have been sent by the peer at the base rate, and read late from
-// the port buffers.
+// For five retransmission timeouts after the switch, and anyway until it is
+// proven, idle sides send an ACK every half retransmission timeout (so that
+// the peer, that may be proven later, is heard while it waits), and a side that receives no valid frame for two
+// retransmission timeouts goes back to the base rate (and sends an ACK there,
+// which makes a peer at the base rate start a new attempt): the attempt
+// failed, either the peer did not switch (the answers were lost) or the rate
+// does not work. After 5 failed attempts in a row the rate is considered not
+// working: the side resets the session (RST). The rate is not lowered
+// automatically, so the next sessions fail the same way: a link that works
+// only some of the time would hide the problem, the maximum rate must be
+// lowered by configuration instead.
 //
-// A side at the negotiated rate that receives no valid frame for two
-// keep-alive intervals goes back to the base rate (and sends an ACK there,
-// which makes a peer at the base rate start a new attempt). If the switch was
-// not proven yet, the attempt failed: either the peer did not switch (the
-// answers were lost) or the rate does not work. After 5 failed attempts in a
-// row the rate is considered not working: the side resets the session (RST).
-// The rate is not lowered automatically, so the next sessions fail the same
-// way: a link that works only some of the time would hide the problem, the
-// maximum rate must be lowered by configuration instead.
+// The switch is proven when a valid frame is received at least three
+// retransmission timeouts after changing the rate: a peer that does not
+// receive our frames falls back to the base rate within two of them (plus a
+// margin, because it may have switched a bit later), so a peer still heard at
+// the negotiated rate hears us too. The frames received earlier only prove
+// that we hear the peer, or may even have been sent by the peer at the base
+// rate, and read late from the port buffers.
 //
-// If the switch was proven, either the line is down (and the link timeout
-// applies as usual) or the peer restarted at the base rate, and its SYN must
-// be heard to reset the session quickly. While at the base rate the side
-// switches again at the next valid frame, as above. When a session ends both
-// sides return to the base rate.
+// Once the switch is proven, the keep-alive interval is the usual one, and a
+// side that receives no valid frame for two keep-alive intervals plus one
+// retransmission timeout goes back to the base rate as well: either the line
+// is down (and the link timeout applies as usual) or the peer restarted at
+// the base rate, and its SYN must be heard to reset the session quickly.
+// While at the base rate the side switches again at the next valid frame, as
+// above. When a session ends both sides return to the base rate.
 package seriallink
