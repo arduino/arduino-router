@@ -491,6 +491,10 @@ func (l *Link) sendLoop() {
 		}
 		now := time.Now()
 		l.lastTx = now
+		if f.typ == frameData {
+			// Not queued anymore: the retransmission timer runs from now on
+			l.rtoStart = now
+		}
 		buf = buf[:0]
 		if l.needsDelimiter() {
 			buf = append(buf, 0)
