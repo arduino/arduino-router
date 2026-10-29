@@ -228,7 +228,8 @@ type Link struct {
 	expected   uint8
 	ackPending int // DATA frames received and not yet acknowledged
 	ackDue     time.Time
-	nakSent    bool
+	nakSent    bool      // a NAK has been sent and no DATA frame accepted since
+	nakAt      time.Time // when the last NAK has been sent
 	lastAdvWnd int
 	lastRx     time.Time
 
@@ -581,12 +582,17 @@ func (l *Link) receive(encoded []byte, discarded bool) {
 	if err != nil {
 		l.stats.RxErrors++
 		switch {
-		case errors.Is(err, errFrameCRC):
-			l.stats.RxCRCErrors++
 		case errors.Is(err, errFrameVersion), errors.Is(err, errFrameType):
 			l.stats.RxProtocolErrors++
+			return // not a line error (e.g. a frame type of a future version)
+		case errors.Is(err, errFrameCRC):
+			l.stats.RxCRCErrors++
 		default:
 			l.stats.RxFramingErrors++
+		}
+		if l.state == stateEstablished {
+			// It may have been a DATA frame: ask to go back
+			l.sendNak(time.Now())
 		}
 		return
 	}
@@ -723,15 +729,26 @@ func (l *Link) handleEstablished(f frame, now time.Time) {
 			l.stats.RxDuplicates++
 			l.enqueueAck()
 		default:
-			// A frame has been lost: ask to go back (only once)
+			// A frame has been lost: ask to go back
 			l.stats.RxOutOfOrder++
-			if !l.nakSent {
-				l.nakSent = true
-				l.stats.TxNaks++
-				l.enqueue(frame{typ: frameNak})
-			}
+			l.sendNak(now)
 		}
 	}
+}
+
+// sendNak asks the peer to go back and retransmit from the expected frame.
+// The NAK is sent once until a DATA frame is accepted (the rest of the window
+// is coming out of order too), or again after a retransmission timeout (the
+// NAK or the retransmission may have been lost, or the corrupted frame was not
+// a DATA frame). Must be called with l.mu held.
+func (l *Link) sendNak(now time.Time) {
+	if l.nakSent && now.Sub(l.nakAt) < l.cfg.RetransmitTimeout {
+		return
+	}
+	l.nakSent = true
+	l.nakAt = now
+	l.stats.TxNaks++
+	l.enqueue(frame{typ: frameNak})
 }
 
 func (l *Link) timerLoop() {

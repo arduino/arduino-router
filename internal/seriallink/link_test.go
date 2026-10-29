@@ -11,6 +11,7 @@ import (
 	"io"
 	"math/rand/v2"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -323,4 +324,49 @@ func TestTinyMaxPayload(t *testing.T) {
 	require.NoError(t, err)
 	defer b.Close()
 	exchange(t, a, b, 1000)
+}
+
+// corruptPort corrupts the first frame written that is longer than minLen.
+type corruptPort struct {
+	*noisyline.Port
+	minLen int
+	done   atomic.Bool
+}
+
+func (p *corruptPort) Write(b []byte) (int, error) {
+	if len(b) > p.minLen && !p.done.Swap(true) {
+		c := bytes.Clone(b)
+		c[len(c)/2] ^= 0x10
+		return p.Port.Write(c)
+	}
+	return p.Port.Write(b)
+}
+
+func TestCorruptedLastFrame(t *testing.T) {
+	// The only DATA frame in flight is corrupted: the receiver answers with
+	// a NAK, so it is retransmitted without waiting for the retransmission
+	// timeout
+	l := noisyline.New(1)
+	cfg := testConfig
+	cfg.RetransmitTimeout = 2 * time.Second
+	cfg.LinkTimeout = 10 * time.Second
+	a, err := New(&corruptPort{Port: l.OpenA(), minLen: 32}, cfg)
+	require.NoError(t, err)
+	defer a.Close()
+	b, err := New(l.OpenB(), cfg)
+	require.NoError(t, err)
+	defer b.Close()
+
+	msg := randomData(1, 100)
+	start := time.Now()
+	_, err = a.Write(msg)
+	require.NoError(t, err)
+	got := make([]byte, len(msg))
+	_, err = io.ReadFull(b, got)
+	require.NoError(t, err)
+	require.Equal(t, msg, got)
+	require.Less(t, time.Since(start), cfg.RetransmitTimeout/2)
+	require.Equal(t, uint64(1), b.Stats().RxCRCErrors+b.Stats().RxFramingErrors)
+	require.Equal(t, uint64(1), b.Stats().TxNaks)
+	require.Zero(t, a.Stats().RetransmitTimeouts)
 }

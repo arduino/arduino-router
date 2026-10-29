@@ -76,9 +76,14 @@
 //
 // The receiver accepts only the DATA frame with seq == expected, anything else
 // is dropped: a duplicate (an old seq) is answered with an ACK, a frame from
-// the future (a frame was lost) is answered with a NAK (once per expected
-// value). Acks are delayed by a few milliseconds to be piggybacked, but are
-// sent immediately when half of the window is unacknowledged.
+// the future (a frame was lost) is answered with a NAK. A corrupted frame
+// received while established is answered with a NAK too: it may have been a
+// DATA frame, and if it was the last one sent the receiver would not notice
+// the loss otherwise (the sender would wait for the retransmission timeout).
+// A NAK is sent again only after a DATA frame has been accepted, or after a
+// retransmission timeout. Acks are delayed by a few milliseconds to be
+// piggybacked, but are sent immediately when half of the window is
+// unacknowledged.
 //
 // The sender retransmits all the unacknowledged frames, in order, upon
 // receiving a NAK or when no progress is made for a retransmission timeout.
