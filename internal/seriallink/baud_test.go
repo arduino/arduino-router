@@ -43,9 +43,13 @@ func requireBaudRate(t *testing.T, rate int, pa, pb *noisyline.Port, a, b *Link)
 }
 
 func (l *Link) baudIsProven() bool {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.baudPhase == baudFast && l.baudProven
+	return l.session.BaudIsProven()
+}
+
+func (s *session) BaudIsProven() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.baudPhase == baudFast && s.baudProven
 }
 
 func TestBaudRateNegotiation(t *testing.T) {

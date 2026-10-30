@@ -298,7 +298,7 @@ func TestPeerRebootSameNonce(t *testing.T) {
 	l.BtoA().SetBlackhole(true)
 	require.NoError(t, b.Close())
 	l.BtoA().SetBlackhole(false)
-	oldNonce := b.nonce
+	oldNonce := b.session.nonce
 	newNonce = func() uint32 { return oldNonce }
 	defer func() { newNonce = rand.Uint32 }()
 	b = newLink(t, l.OpenB())

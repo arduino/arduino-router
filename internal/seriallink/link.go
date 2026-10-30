@@ -185,8 +185,169 @@ const (
 
 // Link is a reliable byte stream over an unreliable serial port.
 type Link struct {
-	port io.ReadWriteCloser
+	port    io.ReadWriteCloser
+	session *session
+
+	senderDone chan struct{}
+	readerDone chan struct{}
+	closeOnce  sync.Once
+	closeErr   error
+}
+
+// New creates a Link over the given port and starts the session handshake.
+// The Link takes ownership of the port: closing the Link closes the port.
+func New(port io.ReadWriteCloser, cfg Config) (*Link, error) {
+	if err := cfg.setDefaults(); err != nil {
+		return nil, err
+	}
+	l := &Link{
+		port:       port,
+		session:    newSession(cfg),
+		senderDone: make(chan struct{}),
+		readerDone: make(chan struct{}),
+	}
+	go l.sendLoop()
+	go l.readLoop()
+	go l.timerLoop()
+	return l, nil
+}
+
+// Read reads stream bytes received from the peer. It blocks until the session
+// is established and some data is available.
+func (l *Link) Read(p []byte) (int, error) {
+	return l.session.Read(p)
+}
+
+// Write sends p to the peer. It blocks until the session is established and
+// all the data has been sent within the peer receive window (it does not wait
+// for the data to be acknowledged).
+func (l *Link) Write(p []byte) (int, error) {
+	return l.session.Write(p)
+}
+
+// Close terminates the session (notifying the peer) and closes the port.
+func (l *Link) Close() error {
+	l.session.Close()
+	l.closeOnce.Do(func() {
+		// Give the sender a chance to flush the RST
+		select {
+		case <-l.senderDone:
+		case <-time.After(100 * time.Millisecond):
+		}
+		l.closeErr = l.port.Close()
+		<-l.senderDone
+		<-l.readerDone
+	})
+	return l.closeErr
+}
+
+// Done returns a channel that is closed when the link terminates.
+func (l *Link) Done() <-chan struct{} {
+	return l.session.done
+}
+
+// BaudRate returns the current baud rate of the port.
+func (l *Link) BaudRate() int {
+	return l.session.BaudRate()
+}
+
+// Stats returns the link counters.
+func (l *Link) Stats() Stats {
+	return l.session.Stats()
+}
+
+func (l *Link) sendLoop() {
+	defer close(l.senderDone)
+	var buf []byte
+	for {
+		f, delimiter, ok := l.session.NextFrame()
+		if !ok {
+			return
+		}
+		if f.typ == frameSetBaud {
+			err := l.session.cfg.SetBaudRate(f.baud)
+			l.session.BaudRateApplied(f.baud, err)
+			continue
+		}
+
+		buf = buf[:0]
+		if delimiter {
+			buf = append(buf, 0)
+		}
+		buf = f.appendEncoded(buf)
+		_, err := l.port.Write(buf)
+
+		l.session.FrameSent(f, err)
+	}
+}
+
+func (l *Link) readLoop() {
+	defer close(l.readerDone)
+	maxEncoded := maxEncodedFrameSize(max(l.session.cfg.MaxPayload, controlPayloadLimit))
+	buf := make([]byte, 1024)
+	acc := make([]byte, 0, maxEncoded)
+	discarding := false
+	for {
+		n, err := l.port.Read(buf)
+		for _, b := range buf[:n] {
+			if b != 0 {
+				if !discarding {
+					acc = append(acc, b)
+					if len(acc) > maxEncoded {
+						// Too long, a delimiter was lost: skip until the next one
+						discarding = true
+						acc = acc[:0]
+					}
+				}
+				continue
+			}
+			if discarding || len(acc) > 0 {
+				l.receive(acc, discarding)
+			}
+			acc = acc[:0]
+			discarding = false
+		}
+		if err != nil {
+			l.session.PortReadFailed(err)
+			return
+		}
+	}
+}
+
+func (l *Link) receive(encoded []byte, discarded bool) {
+	var f frame
+	err := cobs.ErrInvalid
+	if !discarded {
+		f, err = decodeFrame(encoded)
+	}
+	l.session.Receive(f, err)
+}
+
+func (l *Link) timerLoop() {
+	t := time.NewTimer(time.Hour)
+	defer t.Stop()
+	for {
+		t.Reset(time.Until(l.session.OnTimer()))
+		select {
+		case <-t.C:
+		case <-l.session.kick:
+		case <-l.session.done:
+			return
+		}
+	}
+}
+
+// session is the protocol state machine of a Link.
+//
+// Locking rule: the methods starting with an uppercase letter take mu, and
+// can be called from any goroutine. The methods starting with a lowercase
+// letter must be called with mu held: they are helpers of the uppercase ones,
+// and must not be called from outside session.
+type session struct {
+	// These do not change after the creation, and can be used without mu
 	cfg  Config
+	kick chan struct{} // wakes up the timer goroutine
+	done chan struct{} // closed when the link is closed
 
 	writeMu sync.Mutex // serializes Write calls, so a Write is never interleaved with another
 
@@ -234,25 +395,14 @@ type Link struct {
 	lastRx     time.Time
 
 	stats Stats
-
-	kick       chan struct{} // wakes up the timer goroutine
-	done       chan struct{} // closed when the link is closed
-	senderDone chan struct{}
-	readerDone chan struct{}
-	closeOnce  sync.Once
-	closeErr   error
 }
 
-// New creates a Link over the given port and starts the session handshake.
-// The Link takes ownership of the port: closing the Link closes the port.
-func New(port io.ReadWriteCloser, cfg Config) (*Link, error) {
-	if err := cfg.setDefaults(); err != nil {
-		return nil, err
-	}
+func newSession(cfg Config) *session {
 	now := time.Now()
-	l := &Link{
-		port:        port,
+	s := &session{
 		cfg:         cfg,
+		kick:        make(chan struct{}, 1),
+		done:        make(chan struct{}),
 		state:       stateConnecting,
 		nonce:       newNonce(),
 		maxPayload:  cfg.MaxPayload,
@@ -261,356 +411,369 @@ func New(port io.ReadWriteCloser, cfg Config) (*Link, error) {
 		synDeadline: now,
 		lastTx:      now,
 		lastRx:      now,
-		kick:        make(chan struct{}, 1),
-		done:        make(chan struct{}),
-		senderDone:  make(chan struct{}),
-		readerDone:  make(chan struct{}),
 	}
-	l.cond = sync.NewCond(&l.mu)
-	go l.sendLoop()
-	go l.readLoop()
-	go l.timerLoop()
-	return l, nil
+	s.cond = sync.NewCond(&s.mu)
+	return s
 }
 
-// Read reads stream bytes received from the peer. It blocks until the session
-// is established and some data is available.
-func (l *Link) Read(p []byte) (int, error) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for l.recvBuf.Len() == 0 && l.state != stateClosed {
-		l.cond.Wait()
+// Read reads stream bytes received from the peer, see Link.Read.
+func (s *session) Read(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for s.recvBuf.Len() == 0 && s.state != stateClosed {
+		s.cond.Wait()
 	}
-	if l.recvBuf.Len() == 0 {
-		return 0, l.err
+	if s.recvBuf.Len() == 0 {
+		return 0, s.err
 	}
-	n, _ := l.recvBuf.Read(p)
+	n, _ := s.recvBuf.Read(p)
 
 	// Send a window update if the peer may be (almost) stalled
-	if l.state == stateEstablished && l.recvCredit()-l.lastAdvWnd >= max(1, l.sendWindow/2) {
-		l.enqueueAck()
+	if s.state == stateEstablished && s.recvCredit()-s.lastAdvWnd >= max(1, s.sendWindow/2) {
+		s.enqueueAck()
 	}
 	return n, nil
 }
 
-// Write sends p to the peer. It blocks until the session is established and
-// all the data has been sent within the peer receive window (it does not wait
-// for the data to be acknowledged).
-func (l *Link) Write(p []byte) (int, error) {
-	l.writeMu.Lock()
-	defer l.writeMu.Unlock()
-	l.mu.Lock()
-	defer l.mu.Unlock()
+// Write queues p as DATA frames, see Link.Write.
+func (s *session) Write(p []byte) (int, error) {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+	s.mu.Lock()
+	defer s.mu.Unlock()
 
 	n := 0
 	for len(p) > 0 {
-		for l.state == stateConnecting || (l.state == stateEstablished && len(l.unacked) >= min(l.peerWnd, l.sendWindow)) {
-			l.cond.Wait()
+		for s.state == stateConnecting || (s.state == stateEstablished && len(s.unacked) >= min(s.peerWnd, s.sendWindow)) {
+			s.cond.Wait()
 		}
-		if l.state != stateEstablished {
-			return n, l.err
+		if s.state != stateEstablished {
+			return n, s.err
 		}
-		size := min(len(p), l.maxPayload)
-		f := frame{typ: frameData, seq: l.nextSeq, payload: bytes.Clone(p[:size])}
-		l.nextSeq++
-		l.unacked = append(l.unacked, f)
-		l.enqueue(f)
+		size := min(len(p), s.maxPayload)
+		f := frame{typ: frameData, seq: s.nextSeq, payload: bytes.Clone(p[:size])}
+		s.nextSeq++
+		s.unacked = append(s.unacked, f)
+		s.enqueue(f)
 		p = p[size:]
 		n += size
 	}
 	return n, nil
 }
 
-// Close terminates the session (notifying the peer) and closes the port.
-func (l *Link) Close() error {
-	l.mu.Lock()
-	l.terminate(ErrClosed, l.state == stateEstablished)
-	l.mu.Unlock()
-	l.closeOnce.Do(func() {
-		// Give the sender a chance to flush the RST
-		select {
-		case <-l.senderDone:
-		case <-time.After(100 * time.Millisecond):
-		}
-		l.closeErr = l.port.Close()
-		<-l.senderDone
-		<-l.readerDone
-	})
-	return l.closeErr
+// Close terminates the session, notifying the peer if it is established.
+func (s *session) Close() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.terminate(ErrClosed, s.state == stateEstablished)
 }
 
-// Done returns a channel that is closed when the link terminates.
-func (l *Link) Done() <-chan struct{} {
-	return l.done
+// PortReadFailed terminates the session after an error reading from the port.
+func (s *session) PortReadFailed(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.terminate(fmt.Errorf("seriallink: port read: %w", err), false)
 }
 
 // BaudRate returns the current baud rate of the port.
-func (l *Link) BaudRate() int {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.baudRate
+func (s *session) BaudRate() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.baudRate
 }
 
 // Stats returns the link counters.
-func (l *Link) Stats() Stats {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	return l.stats
+func (s *session) Stats() Stats {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.stats
+}
+
+// NextFrame waits for the next frame to send, and returns it along with
+// whether it must be preceded by a delimiter. It returns false when the
+// session is closed and the output queue has been flushed.
+func (s *session) NextFrame() (f frame, delimiter bool, ok bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for {
+		for len(s.outq) == 0 && s.state != stateClosed {
+			s.cond.Wait()
+		}
+		if len(s.outq) == 0 {
+			return frame{}, false, false
+		}
+		if f, ok := s.dequeue(time.Now()); ok {
+			return f, s.needsDelimiter(), true
+		}
+	}
+}
+
+// FrameSent is called by the sender goroutine after writing a frame to the port.
+func (s *session) FrameSent(f frame, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err != nil {
+		s.terminate(fmt.Errorf("seriallink: port write: %w", err), false)
+		return
+	}
+	s.stats.TxFrames++
+	if f.typ == frameData {
+		s.stats.TxDataFrames++
+		s.rtoStart = time.Now()
+	}
+	s.wake()
+}
+
+// BaudRateApplied is called by the sender goroutine after changing the port
+// baud rate.
+func (s *session) BaudRateApplied(rate int, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err != nil {
+		s.terminate(fmt.Errorf("seriallink: setting baud rate %d: %w", rate, err), false)
+		return
+	}
+	s.baudRate = rate
+	if s.baudPhase == baudFast && rate == s.baudTarget {
+		s.baudSwitchedAt = time.Now()
+	}
+	s.wake()
+}
+
+// Receive processes an incoming frame, err is the decoding error.
+func (s *session) Receive(f frame, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	if err != nil {
+		s.stats.RxErrors++
+		switch {
+		case errors.Is(err, errFrameVersion), errors.Is(err, errFrameType):
+			s.stats.RxProtocolErrors++
+			return // not a line error (e.g. a frame type of a future version)
+		case errors.Is(err, errFrameCRC):
+			s.stats.RxCRCErrors++
+		default:
+			s.stats.RxFramingErrors++
+		}
+		if s.state == stateEstablished {
+			// It may have been a DATA frame: ask to go back
+			s.sendNak(now)
+		}
+		return
+	}
+	s.stats.RxFrames++
+	s.handleFrame(f, now)
+	s.wake()
+}
+
+// OnTimer runs the expired timers and returns the next deadline.
+func (s *session) OnTimer() time.Time {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now()
+	next := now.Add(time.Hour)
+	consider := func(d time.Time) {
+		if d.Before(next) {
+			next = d
+		}
+	}
+
+	switch s.state {
+	case stateConnecting:
+		if !now.Before(s.synDeadline) {
+			s.enqueue(frame{typ: frameSyn, payload: s.localParams().marshal(false)})
+			s.synDeadline = now.Add(s.cfg.RetransmitTimeout)
+		}
+		consider(s.synDeadline)
+
+	case stateEstablished:
+		if now.Sub(s.lastRx) >= s.cfg.LinkTimeout {
+			s.terminate(ErrLinkTimeout, true)
+			return next
+		}
+		consider(s.lastRx.Add(s.cfg.LinkTimeout))
+
+		if d, ok := s.onTimerBaud(now); !ok {
+			return next
+		} else if !d.IsZero() {
+			consider(d)
+		}
+
+		if len(s.unacked) > 0 && s.queuedData == 0 {
+			rto := s.rtoStart.Add(s.cfg.RetransmitTimeout)
+			if !now.Before(rto) {
+				s.stats.RetransmitTimeouts++
+				if s.baudPhase != baudFast || s.baudProven {
+					// While switching, the silence fallback bounds the retries
+					s.retries++
+				}
+				if s.retries > s.cfg.MaxRetries {
+					s.terminate(ErrLinkTimeout, true)
+					return next
+				}
+				s.retransmit()
+				rto = now.Add(s.cfg.RetransmitTimeout)
+				s.rtoStart = now
+			}
+			consider(rto)
+		}
+
+		// The following timers only matter if the output queue is empty:
+		// otherwise the next frame sent will carry ack and window anyway.
+		if len(s.outq) == 0 && s.ackPending > 0 {
+			if !now.Before(s.ackDue) {
+				s.enqueueAck()
+			} else {
+				consider(s.ackDue)
+			}
+		}
+		if len(s.outq) == 0 {
+			ka := s.lastTx.Add(s.keepAliveInterval(now))
+			if !now.Before(ka) {
+				s.enqueueAck()
+			} else {
+				consider(ka)
+			}
+		}
+	}
+	return next
 }
 
 // terminate closes the session, if sendRst is true a RST is sent to the peer.
-// Must be called with l.mu held.
-func (l *Link) terminate(err error, sendRst bool) {
-	if l.state == stateClosed {
+func (s *session) terminate(err error, sendRst bool) {
+	if s.state == stateClosed {
 		return
 	}
 	if !errors.Is(err, ErrClosed) {
 		slog.Debug("Serial link terminated", "err", err)
 	}
-	l.state = stateClosed
-	l.err = err
-	l.outq = nil
-	l.queuedData = 0
-	l.unacked = nil
+	s.state = stateClosed
+	s.err = err
+	s.outq = nil
+	s.queuedData = 0
+	s.unacked = nil
 	if sendRst {
-		l.outq = append(l.outq, l.rstFrame())
+		s.outq = append(s.outq, s.rstFrame())
 	}
-	close(l.done)
-	l.cond.Broadcast()
+	close(s.done)
+	s.cond.Broadcast()
 }
 
-// enqueue queues a frame for the sender goroutine. Must be called with l.mu held.
-func (l *Link) enqueue(f frame) {
-	l.outq = append(l.outq, f)
+// enqueue queues a frame for the sender goroutine.
+func (s *session) enqueue(f frame) {
+	s.outq = append(s.outq, f)
 	if f.typ == frameData {
-		l.queuedData++
+		s.queuedData++
 	}
-	l.cond.Broadcast()
-	l.wake()
+	s.cond.Broadcast()
+	s.wake()
 }
 
 // enqueueAck queues an ACK, unless another frame is already queued: since ack
 // and wnd are filled when a frame is actually sent, any frame carries an
-// up-to-date acknowledgement. Must be called with l.mu held.
-func (l *Link) enqueueAck() {
-	if len(l.outq) == 0 {
-		l.enqueue(frame{typ: frameAck})
+// up-to-date acknowledgement.
+func (s *session) enqueueAck() {
+	if len(s.outq) == 0 {
+		s.enqueue(frame{typ: frameAck})
 	}
 }
 
-func (l *Link) rstFrame() frame {
-	return frame{typ: frameRst, payload: binary.LittleEndian.AppendUint32(nil, l.nonce)}
+func (s *session) rstFrame() frame {
+	return frame{typ: frameRst, payload: binary.LittleEndian.AppendUint32(nil, s.nonce)}
 }
 
-func (l *Link) localParams() synParams {
+func (s *session) localParams() synParams {
 	return synParams{
-		maxPayload: l.cfg.MaxPayload,
-		window:     l.cfg.Window,
-		nonce:      l.nonce,
-		baudRates:  baudRateMask(l.cfg.BaudRate, l.cfg.MaxBaudRate),
+		maxPayload: s.cfg.MaxPayload,
+		window:     s.cfg.Window,
+		nonce:      s.nonce,
+		baudRates:  baudRateMask(s.cfg.BaudRate, s.cfg.MaxBaudRate),
 	}
 }
 
-// recvCredit returns how many full DATA frames we can still buffer. Must be
-// called with l.mu held.
-func (l *Link) recvCredit() int {
-	return min((l.recvCap-l.recvBuf.Len())/l.maxPayload, MaxWindowLimit)
+// recvCredit returns how many full DATA frames we can still buffer.
+func (s *session) recvCredit() int {
+	return min((s.recvCap-s.recvBuf.Len())/s.maxPayload, MaxWindowLimit)
 }
 
 // wake wakes up the timer goroutine, to recompute the deadlines.
-func (l *Link) wake() {
+func (s *session) wake() {
 	select {
-	case l.kick <- struct{}{}:
+	case s.kick <- struct{}{}:
 	default:
 	}
 }
 
 // retransmit queues again all the unacknowledged DATA frames, in order (Go-Back-N).
-// Must be called with l.mu held.
-func (l *Link) retransmit() {
-	if len(l.unacked) == 0 {
+func (s *session) retransmit() {
+	if len(s.unacked) == 0 {
 		return
 	}
 	// Drop the DATA frames already in the queue: they are queued again below
-	l.dropQueuedData()
-	for _, f := range l.unacked {
-		l.enqueue(f)
+	s.dropQueuedData()
+	for _, f := range s.unacked {
+		s.enqueue(f)
 	}
-	l.stats.Retransmits += uint64(len(l.unacked))
+	s.stats.Retransmits += uint64(len(s.unacked))
 }
 
 // dropQueuedData removes the DATA frames from the output queue (they are
-// still in unacked). Must be called with l.mu held.
-func (l *Link) dropQueuedData() {
-	q := l.outq[:0]
-	for _, f := range l.outq {
+// still in unacked).
+func (s *session) dropQueuedData() {
+	q := s.outq[:0]
+	for _, f := range s.outq {
 		if f.typ != frameData {
 			q = append(q, f)
 		}
 	}
-	l.outq = q
-	l.queuedData = 0
+	s.outq = q
+	s.queuedData = 0
 }
 
 // isAcked returns true if the DATA frame with the given seq has already been
-// acknowledged. Must be called with l.mu held.
-func (l *Link) isAcked(seq uint8) bool {
-	base := l.nextSeq - uint8(len(l.unacked))
-	return int(seq-base) >= len(l.unacked)
+// acknowledged.
+func (s *session) isAcked(seq uint8) bool {
+	base := s.nextSeq - uint8(len(s.unacked))
+	return int(seq-base) >= len(s.unacked)
 }
 
-func (l *Link) sendLoop() {
-	defer close(l.senderDone)
-	var buf []byte
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	for {
-		for len(l.outq) == 0 && l.state != stateClosed {
-			l.cond.Wait()
+// dequeue removes the next frame from the output queue and fills its
+// acknowledgement. It returns false if the frame must not be sent anymore.
+func (s *session) dequeue(now time.Time) (frame, bool) {
+	f := s.outq[0]
+	s.outq = s.outq[1:]
+	switch f.typ {
+	case frameSetBaud:
+		return f, true
+	case frameData:
+		s.queuedData--
+		if s.isAcked(f.seq) {
+			return f, false // acknowledged while waiting in the queue
 		}
-		if len(l.outq) == 0 {
-			return
-		}
-		f := l.outq[0]
-		l.outq = l.outq[1:]
-		if f.typ == frameSetBaud {
-			l.applyBaudRate(f.baud)
-			continue
-		}
-		switch f.typ {
-		case frameData:
-			l.queuedData--
-			if l.isAcked(f.seq) {
-				continue // acknowledged while waiting in the queue
-			}
-			fallthrough
-		case frameAck, frameNak:
-			f.ack = l.expected
-			f.wnd = uint8(l.recvCredit())
-			l.lastAdvWnd = int(f.wnd)
-			l.ackPending = 0
-		}
-		now := time.Now()
-		l.lastTx = now
-		if f.typ == frameData {
-			// Not queued anymore: the retransmission timer runs from now on
-			l.rtoStart = now
-		}
-		buf = buf[:0]
-		if l.needsDelimiter() {
-			buf = append(buf, 0)
-		}
-		l.mu.Unlock()
+		// Not queued anymore: the retransmission timer runs from now on
+		s.rtoStart = now
+		fallthrough
+	case frameAck, frameNak:
+		f.ack = s.expected
+		f.wnd = uint8(s.recvCredit())
+		s.lastAdvWnd = int(f.wnd)
+		s.ackPending = 0
+	}
+	s.lastTx = now
+	return f, true
+}
 
-		buf = f.appendEncoded(buf)
-		_, err := l.port.Write(buf)
-
-		l.mu.Lock()
-		if err != nil {
-			l.terminate(fmt.Errorf("seriallink: port write: %w", err), false)
-			continue
-		}
-		l.stats.TxFrames++
-		if f.typ == frameData {
-			l.stats.TxDataFrames++
-			l.rtoStart = time.Now()
-		}
-		l.wake()
+// handleFrame processes a valid incoming frame.
+func (s *session) handleFrame(f frame, now time.Time) {
+	s.handleSessionFrame(f, now)
+	if s.state == stateEstablished {
+		s.onValidFrameBaud(now)
 	}
 }
 
-// applyBaudRate changes the port baud rate. Must be called by the sender
-// goroutine with l.mu held.
-func (l *Link) applyBaudRate(rate int) {
-	l.mu.Unlock()
-	err := l.cfg.SetBaudRate(rate)
-	l.mu.Lock()
-	if err != nil {
-		l.terminate(fmt.Errorf("seriallink: setting baud rate %d: %w", rate, err), false)
-		return
-	}
-	l.baudRate = rate
-	if l.baudPhase == baudFast && rate == l.baudTarget {
-		l.baudSwitchedAt = time.Now()
-	}
-	l.wake()
-}
-
-func (l *Link) readLoop() {
-	defer close(l.readerDone)
-	maxEncoded := maxEncodedFrameSize(max(l.cfg.MaxPayload, controlPayloadLimit))
-	buf := make([]byte, 1024)
-	acc := make([]byte, 0, maxEncoded)
-	discarding := false
-	for {
-		n, err := l.port.Read(buf)
-		for _, b := range buf[:n] {
-			if b != 0 {
-				if !discarding {
-					acc = append(acc, b)
-					if len(acc) > maxEncoded {
-						// Too long, a delimiter was lost: skip until the next one
-						discarding = true
-						acc = acc[:0]
-					}
-				}
-				continue
-			}
-			if discarding || len(acc) > 0 {
-				l.receive(acc, discarding)
-			}
-			acc = acc[:0]
-			discarding = false
-		}
-		if err != nil {
-			l.mu.Lock()
-			l.terminate(fmt.Errorf("seriallink: port read: %w", err), false)
-			l.mu.Unlock()
-			return
-		}
-	}
-}
-
-func (l *Link) receive(encoded []byte, discarded bool) {
-	var f frame
-	err := cobs.ErrInvalid
-	if !discarded {
-		f, err = decodeFrame(encoded)
-	}
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if err != nil {
-		l.stats.RxErrors++
-		switch {
-		case errors.Is(err, errFrameVersion), errors.Is(err, errFrameType):
-			l.stats.RxProtocolErrors++
-			return // not a line error (e.g. a frame type of a future version)
-		case errors.Is(err, errFrameCRC):
-			l.stats.RxCRCErrors++
-		default:
-			l.stats.RxFramingErrors++
-		}
-		if l.state == stateEstablished {
-			// It may have been a DATA frame: ask to go back
-			l.sendNak(time.Now())
-		}
-		return
-	}
-	l.stats.RxFrames++
-	l.handleFrame(f, time.Now())
-	l.wake()
-}
-
-// handleFrame processes a valid incoming frame. Must be called with l.mu held.
-func (l *Link) handleFrame(f frame, now time.Time) {
-	l.handleSessionFrame(f, now)
-	if l.state == stateEstablished {
-		l.onValidFrameBaud(now)
-	}
-}
-
-func (l *Link) handleSessionFrame(f frame, now time.Time) {
-	switch l.state {
+func (s *session) handleSessionFrame(f frame, now time.Time) {
+	switch s.state {
 	case stateConnecting:
 		switch f.typ {
 		case frameSyn:
@@ -618,120 +781,120 @@ func (l *Link) handleSessionFrame(f frame, now time.Time) {
 			if !ok {
 				return
 			}
-			l.peer, l.peerKnown = p, true
-			l.sendSynAck()
+			s.peer, s.peerKnown = p, true
+			s.sendSynAck()
 		case frameSynAck:
 			p, ok := parseSynParams(f.payload, true)
-			if !ok || p.echo != l.nonce {
+			if !ok || p.echo != s.nonce {
 				return // stale or for someone else
 			}
-			l.peer, l.peerKnown = p, true
-			l.establish(now)
-			l.sendSynAck() // let the peer complete the handshake too
+			s.peer, s.peerKnown = p, true
+			s.establish(now)
+			s.sendSynAck() // let the peer complete the handshake too
 		case frameData, frameAck, frameNak:
-			if l.peerKnown {
+			if s.peerKnown {
 				// The peer got our SYN_ACK and is already established
-				l.establish(now)
-				l.handleEstablished(f, now)
-			} else if now.Sub(l.lastRst) >= l.cfg.RetransmitTimeout {
+				s.establish(now)
+				s.handleEstablished(f, now)
+			} else if now.Sub(s.lastRst) >= s.cfg.RetransmitTimeout {
 				// The peer is talking to a previous session
-				l.lastRst = now
-				l.enqueue(l.rstFrame())
+				s.lastRst = now
+				s.enqueue(s.rstFrame())
 			}
 		}
 	case stateEstablished:
-		l.lastRx = now
+		s.lastRx = now
 		switch f.typ {
 		case frameSyn:
 			p, ok := parseSynParams(f.payload, false)
 			if !ok {
 				return
 			}
-			if p.nonce == l.peer.nonce && !l.peerActive {
-				l.sendSynAck() // our SYN_ACK was lost
+			if p.nonce == s.peer.nonce && !s.peerActive {
+				s.sendSynAck() // our SYN_ACK was lost
 			} else {
 				// The peer restarted. A peer sends SYN only until it is
 				// established, so a SYN after DATA/ACK/NAK means a new session
 				// even if the nonce is the same (e.g. a weak random source).
-				l.terminate(ErrSessionReset, false)
+				s.terminate(ErrSessionReset, false)
 			}
 		case frameSynAck:
 			// duplicate, ignore
 		case frameRst:
-			l.terminate(ErrSessionReset, false)
+			s.terminate(ErrSessionReset, false)
 		default:
-			l.handleEstablished(f, now)
+			s.handleEstablished(f, now)
 		}
 	}
 }
 
-func (l *Link) sendSynAck() {
-	p := l.localParams()
-	p.echo = l.peer.nonce
-	l.enqueue(frame{typ: frameSynAck, payload: p.marshal(true)})
+func (s *session) sendSynAck() {
+	p := s.localParams()
+	p.echo = s.peer.nonce
+	s.enqueue(frame{typ: frameSynAck, payload: p.marshal(true)})
 }
 
-func (l *Link) establish(now time.Time) {
-	l.state = stateEstablished
-	l.maxPayload = min(l.cfg.MaxPayload, l.peer.maxPayload)
-	l.sendWindow = min(l.cfg.Window, l.peer.window)
-	l.peerWnd = l.peer.window
-	l.lastRx = now
-	l.baudTarget = highestBaudRate(baudRateMask(l.cfg.BaudRate, l.cfg.MaxBaudRate) & l.peer.baudRates)
-	slog.Debug("Serial link established", "max_payload", l.maxPayload, "window", l.sendWindow, "baud_rate", l.baudTarget)
-	l.cond.Broadcast()
+func (s *session) establish(now time.Time) {
+	s.state = stateEstablished
+	s.maxPayload = min(s.cfg.MaxPayload, s.peer.maxPayload)
+	s.sendWindow = min(s.cfg.Window, s.peer.window)
+	s.peerWnd = s.peer.window
+	s.lastRx = now
+	s.baudTarget = highestBaudRate(baudRateMask(s.cfg.BaudRate, s.cfg.MaxBaudRate) & s.peer.baudRates)
+	slog.Debug("Serial link established", "max_payload", s.maxPayload, "window", s.sendWindow, "baud_rate", s.baudTarget)
+	s.cond.Broadcast()
 }
 
-// handleEstablished processes DATA, ACK and NAK frames. Must be called with l.mu held.
-func (l *Link) handleEstablished(f frame, now time.Time) {
-	l.peerActive = true
+// handleEstablished processes DATA, ACK and NAK frames.
+func (s *session) handleEstablished(f frame, now time.Time) {
+	s.peerActive = true
 
 	// Process the (piggybacked) acknowledgement
-	if n := int(f.ack - (l.nextSeq - uint8(len(l.unacked)))); n <= len(l.unacked) {
+	if n := int(f.ack - (s.nextSeq - uint8(len(s.unacked)))); n <= len(s.unacked) {
 		if n > 0 {
-			for _, acked := range l.unacked[:n] {
-				l.stats.TxAckedBytes += uint64(len(acked.payload))
+			for _, acked := range s.unacked[:n] {
+				s.stats.TxAckedBytes += uint64(len(acked.payload))
 			}
-			l.stats.TxAckedFrames += uint64(n)
-			l.unacked = l.unacked[n:]
-			l.retries = 0
-			l.rtoStart = now
+			s.stats.TxAckedFrames += uint64(n)
+			s.unacked = s.unacked[n:]
+			s.retries = 0
+			s.rtoStart = now
 		}
-		l.peerWnd = int(f.wnd)
-		l.cond.Broadcast()
+		s.peerWnd = int(f.wnd)
+		s.cond.Broadcast()
 	}
 
 	switch f.typ {
 	case frameNak:
-		l.stats.RxNaks++
-		l.retransmit()
+		s.stats.RxNaks++
+		s.retransmit()
 	case frameData:
-		switch d := f.seq - l.expected; {
+		switch d := f.seq - s.expected; {
 		case d == 0:
-			if len(f.payload) > l.maxPayload || len(f.payload) > l.recvCap-l.recvBuf.Len() {
+			if len(f.payload) > s.maxPayload || len(f.payload) > s.recvCap-s.recvBuf.Len() {
 				return // the peer did not respect the negotiated limits
 			}
-			l.recvBuf.Write(f.payload)
-			l.stats.RxDataFrames++
-			l.stats.RxDataBytes += uint64(len(f.payload))
-			l.expected++
-			l.nakSent = false
-			l.ackPending++
-			if l.ackPending == 1 {
-				l.ackDue = now.Add(l.cfg.AckDelay)
+			s.recvBuf.Write(f.payload)
+			s.stats.RxDataFrames++
+			s.stats.RxDataBytes += uint64(len(f.payload))
+			s.expected++
+			s.nakSent = false
+			s.ackPending++
+			if s.ackPending == 1 {
+				s.ackDue = now.Add(s.cfg.AckDelay)
 			}
-			if l.ackPending >= max(1, l.sendWindow/2) || l.recvCredit() == 0 {
-				l.enqueueAck()
+			if s.ackPending >= max(1, s.sendWindow/2) || s.recvCredit() == 0 {
+				s.enqueueAck()
 			}
-			l.cond.Broadcast()
+			s.cond.Broadcast()
 		case d >= 128:
 			// Duplicate: our ack has probably been lost
-			l.stats.RxDuplicates++
-			l.enqueueAck()
+			s.stats.RxDuplicates++
+			s.enqueueAck()
 		default:
 			// A frame has been lost: ask to go back
-			l.stats.RxOutOfOrder++
-			l.sendNak(now)
+			s.stats.RxOutOfOrder++
+			s.sendNak(now)
 		}
 	}
 }
@@ -740,101 +903,13 @@ func (l *Link) handleEstablished(f frame, now time.Time) {
 // The NAK is sent once until a DATA frame is accepted (the rest of the window
 // is coming out of order too), or again after a retransmission timeout (the
 // NAK or the retransmission may have been lost, or the corrupted frame was not
-// a DATA frame). Must be called with l.mu held.
-func (l *Link) sendNak(now time.Time) {
-	if l.nakSent && now.Sub(l.nakAt) < l.cfg.RetransmitTimeout {
+// a DATA frame).
+func (s *session) sendNak(now time.Time) {
+	if s.nakSent && now.Sub(s.nakAt) < s.cfg.RetransmitTimeout {
 		return
 	}
-	l.nakSent = true
-	l.nakAt = now
-	l.stats.TxNaks++
-	l.enqueue(frame{typ: frameNak})
-}
-
-func (l *Link) timerLoop() {
-	t := time.NewTimer(time.Hour)
-	defer t.Stop()
-	for {
-		l.mu.Lock()
-		next := l.onTimer(time.Now())
-		l.mu.Unlock()
-		t.Reset(time.Until(next))
-		select {
-		case <-t.C:
-		case <-l.kick:
-		case <-l.done:
-			return
-		}
-	}
-}
-
-// onTimer runs the expired timers and returns the next deadline. Must be
-// called with l.mu held.
-func (l *Link) onTimer(now time.Time) time.Time {
-	next := now.Add(time.Hour)
-	consider := func(d time.Time) {
-		if d.Before(next) {
-			next = d
-		}
-	}
-
-	switch l.state {
-	case stateConnecting:
-		if !now.Before(l.synDeadline) {
-			l.enqueue(frame{typ: frameSyn, payload: l.localParams().marshal(false)})
-			l.synDeadline = now.Add(l.cfg.RetransmitTimeout)
-		}
-		consider(l.synDeadline)
-
-	case stateEstablished:
-		if now.Sub(l.lastRx) >= l.cfg.LinkTimeout {
-			l.terminate(ErrLinkTimeout, true)
-			return next
-		}
-		consider(l.lastRx.Add(l.cfg.LinkTimeout))
-
-		if d, ok := l.onTimerBaud(now); !ok {
-			return next
-		} else if !d.IsZero() {
-			consider(d)
-		}
-
-		if len(l.unacked) > 0 && l.queuedData == 0 {
-			rto := l.rtoStart.Add(l.cfg.RetransmitTimeout)
-			if !now.Before(rto) {
-				l.stats.RetransmitTimeouts++
-				if l.baudPhase != baudFast || l.baudProven {
-					// While switching, the silence fallback bounds the retries
-					l.retries++
-				}
-				if l.retries > l.cfg.MaxRetries {
-					l.terminate(ErrLinkTimeout, true)
-					return next
-				}
-				l.retransmit()
-				rto = now.Add(l.cfg.RetransmitTimeout)
-				l.rtoStart = now
-			}
-			consider(rto)
-		}
-
-		// The following timers only matter if the output queue is empty:
-		// otherwise the next frame sent will carry ack and window anyway.
-		if len(l.outq) == 0 && l.ackPending > 0 {
-			if !now.Before(l.ackDue) {
-				l.enqueueAck()
-			} else {
-				consider(l.ackDue)
-			}
-		}
-		if len(l.outq) == 0 {
-			ka := l.lastTx.Add(l.keepAliveInterval(now))
-			if !now.Before(ka) {
-				l.enqueueAck()
-			} else {
-				consider(ka)
-			}
-		}
-	}
-	return next
+	s.nakSent = true
+	s.nakAt = now
+	s.stats.TxNaks++
+	s.enqueue(frame{typ: frameNak})
 }
