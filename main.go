@@ -9,6 +9,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -19,6 +20,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -33,6 +35,8 @@ import (
 	"github.com/arduino/arduino-router/internal/monitorapi"
 	"github.com/arduino/arduino-router/internal/msgpackrouter"
 	networkapi "github.com/arduino/arduino-router/internal/network-api"
+	"github.com/arduino/arduino-router/internal/serialdetect"
+	"github.com/arduino/arduino-router/internal/seriallink"
 	"github.com/arduino/arduino-router/msgpackrpc"
 )
 
@@ -47,6 +51,8 @@ type Config struct {
 	AfterReadyCommand string
 	SerialPortAddr    string
 	SerialBaudRate    int
+	SerialMaxBaudRate int
+	SerialProtocol    string
 	MonitorPortAddr   string
 }
 
@@ -77,6 +83,8 @@ func main() {
 	cmd.Flags().StringVar(&cfg.AfterReadyCommand, "after-ready", "", "Execute a command after the router is ready)")
 	cmd.Flags().StringVarP(&cfg.SerialPortAddr, "serial-port", "p", "", "Serial port address")
 	cmd.Flags().IntVarP(&cfg.SerialBaudRate, "serial-baudrate", "b", 115200, "Serial port baud rate")
+	cmd.Flags().IntVar(&cfg.SerialMaxBaudRate, "serial-max-baudrate", 1000000, "Maximum baud rate negotiated with the MCU, after starting at --serial-baudrate (only with the reliable protocol, 0 to disable the negotiation)")
+	cmd.Flags().StringVar(&cfg.SerialProtocol, "serial-protocol", "auto", "Serial port protocol: 'raw' (plain msgpack-rpc), 'reliable' (msgpack-rpc over a framed link with integrity check, retransmission and flow control) or 'auto' (detect the protocol used by the MCU)")
 	cmd.Flags().StringVarP(&cfg.MonitorPortAddr, "monitor-port", "m", "127.0.0.1:7500", "Listening port for MCU monitor proxy")
 	cmd.AddCommand(&cobra.Command{
 		Use:  "version",
@@ -182,23 +190,29 @@ func startRouter(ctx context.Context, cfg Config) error {
 
 	// Open serial port if specified
 	if cfg.SerialPortAddr != "" {
+		if cfg.SerialProtocol != "raw" && cfg.SerialProtocol != "reliable" && cfg.SerialProtocol != "auto" {
+			return fmt.Errorf("invalid serial protocol: %s", cfg.SerialProtocol)
+		}
 		var serialLock sync.Mutex
 		var serialOpened = sync.NewCond(&serialLock)
 		var serialClosed = sync.NewCond(&serialLock)
 		var serialCloseSignal = make(chan struct{})
+		var invalidNumberOfParametersErr = []any{1, "Invalid number of parameters"}
+		var invalidParameterTypeErr = []any{1, "Invalid parameter type"}
+		var invalidSerialPortAddressErr = []any{1, "Invalid serial port address"}
 		err := router.RegisterMethod("$/serial/open", func(_ *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 			if len(params) != 1 {
-				res(nil, []any{1, "Invalid number of parameters"})
+				res(nil, invalidNumberOfParametersErr)
 				return
 			}
 			address, ok := params[0].(string)
 			if !ok {
-				res(nil, []any{1, "Invalid parameter type"})
+				res(nil, invalidParameterTypeErr)
 				return
 			}
 			slog.Info("Request for opening serial port", "serial", address)
 			if address != cfg.SerialPortAddr {
-				res(nil, []any{1, "Invalid serial port address"})
+				res(nil, invalidSerialPortAddressErr)
 				return
 			}
 			serialOpened.L.Lock()
@@ -212,17 +226,17 @@ func startRouter(ctx context.Context, cfg Config) error {
 		f.Assert(err == nil, "Failed to register $/serial/open method")
 		err = router.RegisterMethod("$/serial/close", func(_ *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 			if len(params) != 1 {
-				res(nil, []any{1, "Invalid number of parameters"})
+				res(nil, invalidNumberOfParametersErr)
 				return
 			}
 			address, ok := params[0].(string)
 			if !ok {
-				res(nil, []any{1, "Invalid parameter type"})
+				res(nil, invalidParameterTypeErr)
 				return
 			}
 			slog.Info("Request for closing serial port", "serial", address)
 			if address != cfg.SerialPortAddr {
-				res(nil, []any{1, "Invalid serial port address"})
+				res(nil, invalidSerialPortAddressErr)
 				return
 			}
 			serialClosed.L.Lock()
@@ -235,6 +249,23 @@ func startRouter(ctx context.Context, cfg Config) error {
 			res(true, nil)
 		})
 		f.Assert(err == nil, "Failed to register $/serial/close method")
+		var stats serialStats
+		err = router.RegisterMethod("$/serial/stats", func(_ *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
+			if len(params) != 0 {
+				res(nil, invalidNumberOfParametersErr)
+				return
+			}
+			res(stats.get(), nil)
+		})
+		f.Assert(err == nil, "Failed to register $/serial/stats method")
+		serialMode := func(baudRate int) *serial.Mode {
+			return &serial.Mode{
+				BaudRate: baudRate,
+				DataBits: 8,
+				StopBits: serial.OneStopBit,
+				Parity:   serial.NoParity,
+			}
+		}
 		go func() {
 			for {
 				serialOpened.L.Lock()
@@ -246,12 +277,7 @@ func startRouter(ctx context.Context, cfg Config) error {
 				serialOpened.L.Unlock()
 
 				slog.Debug("Opening serial connection", "serial", cfg.SerialPortAddr)
-				serialPort, err := serial.Open(cfg.SerialPortAddr, &serial.Mode{
-					BaudRate: cfg.SerialBaudRate,
-					DataBits: 8,
-					StopBits: serial.OneStopBit,
-					Parity:   serial.NoParity,
-				})
+				serialPort, err := serial.Open(cfg.SerialPortAddr, serialMode(cfg.SerialBaudRate))
 				if err != nil {
 					slog.Debug("Failed to open serial port. Wait for it...", "serial", cfg.SerialPortAddr, "err", err)
 					if err := waitForPort(ctx, cfg.SerialPortAddr); err != nil {
@@ -260,8 +286,43 @@ func startRouter(ctx context.Context, cfg Config) error {
 					}
 					continue
 				}
-				slog.Info("Opened serial connection", "serial", cfg.SerialPortAddr)
-				wr := &MsgpackDebugStream{Name: cfg.SerialPortAddr, Upstream: serialPort}
+				slog.Info("Opened serial connection", "serial", cfg.SerialPortAddr, "protocol", cfg.SerialProtocol)
+				newReliable := func(port io.ReadWriteCloser) (io.ReadWriteCloser, error) {
+					link, err := seriallink.New(port, seriallink.Config{
+						BaudRate:    cfg.SerialBaudRate,
+						MaxBaudRate: cfg.SerialMaxBaudRate,
+						SetBaudRate: func(rate int) error {
+							// The Go runtime signals may interrupt the syscalls
+							if err := retryOnEINTR(serialPort.Drain); err != nil {
+								return err
+							}
+							return retryOnEINTR(func() error { return serialPort.SetMode(serialMode(rate)) })
+						},
+					})
+					if err != nil {
+						return nil, err
+					}
+					stats.newSession("reliable", link)
+					return link, nil
+				}
+				var stream io.ReadWriteCloser = serialPort
+				switch cfg.SerialProtocol {
+				case "raw":
+					stats.newSession("raw", nil)
+				case "reliable":
+					link, err := newReliable(serialPort)
+					f.Assert(err == nil, "Failed to create serial link")
+					stream = link
+				case "auto":
+					stats.newSession("", nil)
+					stream = serialdetect.NewAutoStream(serialPort, newReliable, func(p serialdetect.Protocol) {
+						slog.Info("Detected serial protocol", "serial", cfg.SerialPortAddr, "protocol", p)
+						if p == serialdetect.Raw {
+							stats.newSession("raw", nil)
+						}
+					})
+				}
+				wr := &MsgpackDebugStream{Name: cfg.SerialPortAddr, Upstream: stats.count(stream)}
 
 				// wait for the close command from RPC or for a failure of the serial port (routerExit)
 				routerExit := router.Accept(wr)
@@ -329,6 +390,86 @@ func startRouter(ctx context.Context, cfg Config) error {
 	return nil
 }
 
+// serialStats keeps track of the statistics of the serial links: a new link is
+// created every time the serial port is opened or the MCU restarts.
+type serialStats struct {
+	mu       sync.Mutex
+	protocol string           // protocol of the current session, empty if not yet known
+	link     *seriallink.Link // link of the current session, nil if not using the reliable protocol
+	closed   seriallink.Stats // sum of the counters of the previous links
+	sessions int              // number of reliable links created
+
+	rxBytes, txBytes atomic.Uint64 // msgpack-rpc stream bytes, any protocol
+}
+
+// serialStatsResponse is the result of the $/serial/stats method.
+type serialStatsResponse struct {
+	Protocol string           `msgpack:"protocol"` // "raw", "reliable" or "" if not yet known
+	Sessions int              `msgpack:"sessions"` // number of reliable link sessions since the router started
+	Current  seriallink.Stats `msgpack:"current"`  // counters of the current reliable link session
+	Total    seriallink.Stats `msgpack:"total"`    // counters of all the reliable link sessions
+	RxBytes  uint64           `msgpack:"rx_bytes"` // msgpack-rpc stream bytes received from the MCU, any protocol
+	TxBytes  uint64           `msgpack:"tx_bytes"` // msgpack-rpc stream bytes sent to the MCU, any protocol
+}
+
+// newSession starts tracking a new session, link is nil if the protocol is not "reliable".
+func (s *serialStats) newSession(protocol string, link *seriallink.Link) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.link != nil {
+		s.closed.Add(s.link.Stats())
+	}
+	s.protocol = protocol
+	s.link = link
+	if link != nil {
+		s.sessions++
+	}
+}
+
+func (s *serialStats) get() serialStatsResponse {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	res := serialStatsResponse{
+		Protocol: s.protocol,
+		Sessions: s.sessions,
+		Total:    s.closed,
+		RxBytes:  s.rxBytes.Load(),
+		TxBytes:  s.txBytes.Load(),
+	}
+	if s.link != nil {
+		res.Current = s.link.Stats()
+		res.Total.Add(res.Current)
+	}
+	return res
+}
+
+// count returns stream wrapped to count the bytes read and written.
+func (s *serialStats) count(stream io.ReadWriteCloser) io.ReadWriteCloser {
+	return &countingStream{ReadWriteCloser: stream, stats: s}
+}
+
+// countingStream counts the bytes read from and written to a stream.
+type countingStream struct {
+	io.ReadWriteCloser
+	stats *serialStats
+}
+
+func (c *countingStream) Read(p []byte) (int, error) {
+	n, err := c.ReadWriteCloser.Read(p)
+	if n > 0 {
+		c.stats.rxBytes.Add(uint64(n))
+	}
+	return n, err
+}
+
+func (c *countingStream) Write(p []byte) (int, error) {
+	n, err := c.ReadWriteCloser.Write(p)
+	if n > 0 {
+		c.stats.txBytes.Add(uint64(n))
+	}
+	return n, err
+}
+
 func waitForPort(ctx context.Context, waitPort string) error {
 	target := filepath.Clean(waitPort)
 
@@ -370,6 +511,15 @@ func waitForPort(ctx context.Context, waitPort string) error {
 					_ = watcher.Add(ev.Name)
 				}
 			}
+		}
+	}
+}
+
+// retryOnEINTR calls f until it does not fail with EINTR.
+func retryOnEINTR(f func() error) error {
+	for {
+		if err := f(); !errors.Is(err, syscall.EINTR) {
+			return err
 		}
 	}
 }
