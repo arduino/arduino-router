@@ -23,10 +23,13 @@ type RouterRequestHandler func(rpc *msgpackrpc.Connection, params []any, res Rou
 
 type RouterResponseHandler func(result any, err any)
 
+type RouterConnectionCleanupHandler func(conn *msgpackrpc.Connection)
+
 type Router struct {
-	routesLock     sync.Mutex
-	routes         map[string]*msgpackrpc.Connection
-	routesInternal map[string]RouterRequestHandler
+	routesLock          sync.Mutex
+	routes              map[string]*msgpackrpc.Connection
+	routesInternal      map[string]RouterRequestHandler
+	connCleanupHandlers []RouterConnectionCleanupHandler
 }
 
 func New() *Router {
@@ -58,6 +61,12 @@ func (r *Router) RegisterMethod(method string, handler RouterRequestHandler) err
 	r.routesInternal[method] = handler
 	slog.Info("Registered internal method", "method", method)
 	return nil
+}
+
+func (r *Router) RegisterConnectionCleanupHandler(handler RouterConnectionCleanupHandler) {
+	r.routesLock.Lock()
+	defer r.routesLock.Unlock()
+	r.connCleanupHandlers = append(r.connCleanupHandlers, handler)
 }
 
 // rawParams is a wrapper around the raw parameters received from the msgpackrpc connection.
@@ -252,10 +261,15 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 	msgpackconn.SetKeepParamsAndResponsesAsRaw(true)
 	msgpackconn.Run()
 
-	// Unregister the methods when the connection is terminated
+	// When the connection is terminated:
+	// - Unregister the methods
 	r.removeMethodsFromConnection(msgpackconn)
+	// - Call all close handlers
+	for _, closeHandler := range r.connCleanupHandlers {
+		closeHandler(msgpackconn)
+	}
+	// - Gracefully close the connection
 	msgpackconn.Close()
-
 }
 
 func (r *Router) registerMethod(method string, conn *msgpackrpc.Connection) error {

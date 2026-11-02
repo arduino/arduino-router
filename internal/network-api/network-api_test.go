@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arduino/arduino-router/internal/msgpackrouter"
 	"github.com/arduino/arduino-router/msgpackrpc"
 
 	"github.com/stretchr/testify/require"
@@ -148,7 +149,7 @@ const testCert = "-----BEGIN CERTIFICATE-----\n" +
 	"-----END CERTIFICATE-----\n"
 
 func TestTCPNetworkAPI(t *testing.T) {
-	var rpc *msgpackrpc.Connection
+	rpc := &msgpackrpc.Connection{} // Bogus connection
 	var listID any
 	tcpListen(rpc, []any{"localhost", 9999}, func(res, err any) {
 		listID = res
@@ -251,6 +252,118 @@ func TestTCPNetworkAPI(t *testing.T) {
 	})
 
 	wg.Wait()
+}
+
+func TestTCPConnectSSLInvalidParameterCounts(t *testing.T) {
+	rpc := &msgpackrpc.Connection{}
+	for _, params := range [][]any{
+		{},
+		{"localhost"},
+		{"localhost", uint16(443), "", "extra"},
+	} {
+		t.Run(fmt.Sprintf("%d parameters", len(params)), func(t *testing.T) {
+			tcpConnectSSL(rpc, params, func(result, err any) {
+				require.Nil(t, result)
+				require.Equal(t, []any{1, "Invalid number of parameters, expected server address, port and optional TLS cert"}, err)
+			})
+		})
+	}
+}
+
+func TestNetworkAPIRejectsInvalidParameterCounts(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler func(*msgpackrpc.Connection, []any, msgpackrouter.RouterResponseHandler)
+		wantErr []any
+	}{
+		{"tcp/connect", tcpConnect, []any{1, "Invalid number of parameters, expected server address and port"}},
+		{"tcp/listen", tcpListen, []any{1, "Invalid number of parameters, expected listen address and port"}},
+		{"tcp/accept", tcpAccept, []any{1, "Invalid number of parameters, expected listener ID"}},
+		{"tcp/read", tcpRead, []any{1, "Invalid number of parameters, expected (connection ID, max bytes to read[, optional timeout in ms])"}},
+		{"tcp/write", tcpWrite, []any{1, "Invalid number of parameters, expected (connection ID, data to write)"}},
+		{"tcp/close", tcpClose, []any{1, "Invalid number of parameters, expected connection ID"}},
+		{"tcp/closeListener", tcpCloseListener, []any{1, "Invalid number of parameters, expected listener ID"}},
+		{"tcp/connectSSL", tcpConnectSSL, []any{1, "Invalid number of parameters, expected server address, port and optional TLS cert"}},
+		{"udp/connect", udpConnect, []any{1, "Invalid number of parameters, expected server address and port"}},
+		{"udp/beginPacket", udpBeginPacket, []any{1, "Invalid number of parameters, expected udpConnId, dest address, dest port"}},
+		{"udp/write", udpWrite, []any{1, "Invalid number of parameters, expected udpConnId, payload"}},
+		{"udp/endPacket", udpEndPacket, []any{1, "Invalid number of parameters, expected expected udpConnId"}},
+		{"udp/awaitPacket", udpAwaitPacket, []any{1, "Invalid number of parameters, expected (UDP connection ID[, optional timeout in ms])"}},
+		{"udp/dropPacket", udpDropPacket, []any{1, "Invalid number of parameters, expected (UDP connection ID[, optional timeout in ms])"}},
+		{"udp/read", udpRead, []any{1, "Invalid number of parameters, expected (UDP connection ID, max bytes to read)"}},
+		{"udp/close", udpClose, []any{1, "Invalid number of parameters, expected UDP connection ID"}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.handler(&msgpackrpc.Connection{}, nil, func(result, err any) {
+				require.Nil(t, result)
+				require.Equal(t, test.wantErr, err)
+			})
+		})
+	}
+}
+
+func TestUDPDropPacket(t *testing.T) {
+	var connectionID uint
+	udpConnect(nil, []any{"", 0}, func(result, err any) {
+		require.Nil(t, err)
+		connectionID = result.(uint)
+	})
+	defer udpClose(nil, []any{connectionID}, func(_, _ any) {})
+
+	sockID := socketID{id: connectionID}
+	lock.Lock()
+	udpReadBuffers[sockID] = []byte("discard me")
+	lock.Unlock()
+
+	udpDropPacket(nil, []any{connectionID}, func(result, err any) {
+		require.Nil(t, err)
+		require.Equal(t, true, result)
+	})
+	udpRead(nil, []any{connectionID, 100}, func(result, err any) {
+		require.Nil(t, err)
+		require.Empty(t, result)
+	})
+}
+
+func TestCleanupClosesAndRemovesUDPConnection(t *testing.T) {
+	rpc := &msgpackrpc.Connection{}
+	var connectionID uint
+	udpConnect(rpc, []any{"", 0}, func(result, err any) {
+		require.Nil(t, err)
+		connectionID = result.(uint)
+	})
+	sockID := socketID{conn: rpc, id: connectionID}
+
+	udpBeginPacket(rpc, []any{connectionID, localHost, 12345}, func(result, err any) {
+		require.Nil(t, err)
+		require.Equal(t, true, result)
+	})
+	udpWrite(rpc, []any{connectionID, "pending"}, func(result, err any) {
+		require.Nil(t, err)
+		require.Equal(t, 7, result)
+	})
+	lock.Lock()
+	udpReadBuffers[sockID] = []byte("buffered")
+	lock.Unlock()
+	lock.RLock()
+	udpConn := liveUdpConnections[sockID]
+	lock.RUnlock()
+
+	cleanup(rpc)
+	require.Error(t, udpConn.SetReadDeadline(time.Now()))
+
+	lock.RLock()
+	_, connectionExists := liveUdpConnections[sockID]
+	_, readBufferExists := udpReadBuffers[sockID]
+	_, writeBufferExists := udpWriteBuffers[sockID]
+	_, writeTargetExists := udpWriteTargets[sockID]
+	lock.RUnlock()
+	require.False(t, connectionExists)
+	require.False(t, readBufferExists)
+	require.False(t, writeBufferExists)
+	require.False(t, writeTargetExists)
 }
 
 const anyHost = "0.0.0.0"
