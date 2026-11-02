@@ -17,7 +17,7 @@ import (
 func seq(from, to int) []byte {
 	var b []byte
 	for i := from; i <= to; i++ {
-		b = append(b, byte(i))
+		b = append(b, byte(i&0xFF))
 	}
 	return b
 }
@@ -51,20 +51,21 @@ func TestVectors(t *testing.T) {
 }
 
 func TestRoundTrip(t *testing.T) {
-	cases := [][]byte{
+	cases := make([][]byte, 0, 1006)
+	cases = append(cases,
 		bytes.Repeat([]byte{1}, 253),
 		bytes.Repeat([]byte{1}, 254),
 		bytes.Repeat([]byte{1}, 255),
 		bytes.Repeat([]byte{1}, 508),
 		append(bytes.Repeat([]byte{1}, 254), 0),
 		bytes.Repeat([]byte{0}, 600),
-	}
-	rng := rand.New(rand.NewPCG(1, 2))
+	)
+	rng := rand.New(rand.NewPCG(1, 2)) // #nosec G404 -- fixed seed, for reproducible test data
 	for range 1000 {
 		b := make([]byte, rng.IntN(1200))
 		for i := range b {
 			if rng.IntN(4) > 0 { // plenty of zeros, as in msgpack
-				b[i] = byte(rng.Uint32())
+				b[i] = byte(rng.Uint32() & 0xFF)
 			}
 		}
 		cases = append(cases, b)

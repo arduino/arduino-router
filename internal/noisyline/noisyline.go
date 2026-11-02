@@ -70,7 +70,7 @@ type Wire struct {
 }
 
 func newWire(seed1, seed2 uint64, txRate, rxRate *atomic.Int64) *Wire {
-	w := &Wire{rng: rand.New(rand.NewPCG(seed1, seed2)), txRate: txRate, rxRate: rxRate}
+	w := &Wire{rng: rand.New(rand.NewPCG(seed1, seed2)), txRate: txRate, rxRate: rxRate} // #nosec G404 -- seeded, for reproducible fault injection
 	w.cond = sync.NewCond(&w.mu)
 	return w
 }
@@ -109,7 +109,7 @@ func (w *Wire) send(p []byte) {
 		// A UART sampling at the wrong rate gets garbage (and a different
 		// number of bytes, here simplified to the same number)
 		for range p {
-			w.buf = append(w.buf, byte(w.rng.Uint32()))
+			w.buf = append(w.buf, byte(w.rng.Uint32()&0xFF))
 		}
 		w.stats.Mismatched += len(p)
 		w.cond.Broadcast()
@@ -118,7 +118,7 @@ func (w *Wire) send(p []byte) {
 	f := w.faults
 	for _, b := range p {
 		if f.Garbage > 0 && w.rng.Float64() < f.Garbage {
-			w.buf = append(w.buf, byte(w.rng.Uint32()))
+			w.buf = append(w.buf, byte(w.rng.Uint32()&0xFF))
 			w.stats.Garbage++
 		}
 		if f.Drop > 0 && w.rng.Float64() < f.Drop {

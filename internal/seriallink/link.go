@@ -734,7 +734,7 @@ func (s *session) dropQueuedData() {
 // isAcked returns true if the DATA frame with the given seq has already been
 // acknowledged.
 func (s *session) isAcked(seq uint8) bool {
-	base := s.nextSeq - uint8(len(s.unacked))
+	base := s.nextSeq - uint8(len(s.unacked)) // #nosec G115 -- at most MaxWindowLimit
 	return int(seq-base) >= len(s.unacked)
 }
 
@@ -756,7 +756,7 @@ func (s *session) dequeue(now time.Time) (frame, bool) {
 		fallthrough
 	case frameAck, frameNak:
 		f.ack = s.expected
-		f.wnd = uint8(s.recvCredit())
+		f.wnd = uint8(s.recvCredit()) // #nosec G115 -- in the 0..MaxWindowLimit range
 		s.lastAdvWnd = int(f.wnd)
 		s.ackPending = 0
 	}
@@ -850,7 +850,7 @@ func (s *session) handleEstablished(f frame, now time.Time) {
 	s.peerActive = true
 
 	// Process the (piggybacked) acknowledgement
-	if n := int(f.ack - (s.nextSeq - uint8(len(s.unacked)))); n <= len(s.unacked) {
+	if n := int(f.ack - (s.nextSeq - uint8(len(s.unacked)))); n <= len(s.unacked) { // #nosec G115 -- at most MaxWindowLimit
 		if n > 0 {
 			for _, acked := range s.unacked[:n] {
 				s.stats.TxAckedBytes += uint64(len(acked.payload))

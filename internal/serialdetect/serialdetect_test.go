@@ -3,6 +3,7 @@
 // SPDX-FileCopyrightText: Arduino s.r.l. and/or its affiliated companies
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+//nolint:goconst
 package serialdetect
 
 import (
@@ -10,6 +11,7 @@ import (
 	"context"
 	"encoding/hex"
 	"io"
+	"slices"
 	"testing"
 	"testing/iotest"
 	"time"
@@ -95,7 +97,8 @@ func TestDetectRejectsCorruptedFrames(t *testing.T) {
 	// A frame with a bad CRC is not enough, the next good one is
 	bad := bytes.Clone(synFrame)
 	bad[9] ^= 0x01
-	data := append(bad, synFrame...)
+	data := bytes.Clone(bad)
+	data = append(data, synFrame...)
 	p, buf := detect(t, iotest.OneByteReader(bytes.NewReader(data)))
 	require.Equal(t, Reliable, p)
 	require.Equal(t, data, buf)
@@ -108,9 +111,12 @@ func TestDetectRejectsCorruptedFrames(t *testing.T) {
 func TestDetectSkipsGarbage(t *testing.T) {
 	// Garbage looking like the beginning of a msgpack-rpc message, with a huge
 	// string length, must not stall the detection
-	garbage := []byte{0x94, 0x00, 0x01, 0xDB, 0xFF, 0xFF, 0xFF, 0xFF}
-	garbage = append(garbage, bytes.Repeat([]byte{'x'}, 2*maxIncompleteMessage)...)
-	data := append(garbage, rawBoot(t)...)
+	garbage := slices.Concat(
+		[]byte{0x94, 0x00, 0x01, 0xDB, 0xFF, 0xFF, 0xFF, 0xFF},
+		bytes.Repeat([]byte{'x'}, 2*maxIncompleteMessage),
+	)
+	data := bytes.Clone(garbage)
+	data = append(data, rawBoot(t)...)
 	p, buf := detect(t, bytes.NewReader(data))
 	require.Equal(t, Raw, p)
 	require.Equal(t, rawReset(t), buf)
@@ -131,7 +137,8 @@ func TestDetectSkipsGarbage(t *testing.T) {
 func TestDetectLimitsMemory(t *testing.T) {
 	// Lots of undecided garbage, then a message
 	garbage := bytes.Repeat([]byte("garbage "), 3*maxBuffered/8)
-	data := append(garbage, rawBoot(t)...)
+	data := bytes.Clone(garbage)
+	data = append(data, rawBoot(t)...)
 	p, buf := detect(t, bytes.NewReader(data))
 	require.Equal(t, Raw, p)
 	require.Equal(t, rawReset(t), buf)

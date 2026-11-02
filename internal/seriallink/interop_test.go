@@ -66,7 +66,7 @@ func startCppPeer(t *testing.T, line *noisyline.Line, args ...string) *cppPeer {
 	if bin == "" {
 		t.Skip("SERIALLINK_PEER not set, see interop_test.go")
 	}
-	cmd := exec.Command(bin, append(slices.Clone(cppPeerTiming), args...)...)
+	cmd := exec.Command(bin, append(slices.Clone(cppPeerTiming), args...)...) // #nosec G702 -- test peer executable is explicitly provided via SERIALLINK_PEER
 	cmd.Stderr = logWriter{t}
 	stdin, err := cmd.StdinPipe()
 	require.NoError(t, err)
@@ -158,7 +158,7 @@ func (p *cppPeer) close(t *testing.T) {
 // echo sends size random bytes through the link and checks that the peer
 // echoes them back intact.
 func echo(t *testing.T, l *Link, size int) {
-	data := randomData(uint64(size), size)
+	data := randomData(uint64(size), size) // #nosec G115 -- size is never negative
 	writeErr := make(chan error, 1)
 	go func() {
 		for p := data; len(p) > 0; {
@@ -324,7 +324,7 @@ func newBaudLinkInterop(t *testing.T, p *noisyline.Port, maxBaud int) *Link {
 
 // requireInteropBaudRate waits until the Go side is at the given rate, and
 // checks that data goes through.
-func requireInteropBaudRate(t *testing.T, line *noisyline.Line, pa *noisyline.Port, a *Link, rate int) {
+func requireInteropBaudRate(t *testing.T, _ *noisyline.Line, pa *noisyline.Port, a *Link, rate int) {
 	require.Eventually(t, func() bool {
 		return a.BaudRate() == rate && a.Stats().BaudRateSwitches > 0
 	}, 2*time.Second, time.Millisecond)

@@ -197,19 +197,22 @@ func startRouter(ctx context.Context, cfg Config) error {
 		var serialOpened = sync.NewCond(&serialLock)
 		var serialClosed = sync.NewCond(&serialLock)
 		var serialCloseSignal = make(chan struct{})
+		var invalidNumberOfParametersErr = []any{1, "Invalid number of parameters"}
+		var invalidParameterTypeErr = []any{1, "Invalid parameter type"}
+		var invalidSerialPortAddressErr = []any{1, "Invalid serial port address"}
 		err := router.RegisterMethod("$/serial/open", func(_ *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 			if len(params) != 1 {
-				res(nil, []any{1, "Invalid number of parameters"})
+				res(nil, invalidNumberOfParametersErr)
 				return
 			}
 			address, ok := params[0].(string)
 			if !ok {
-				res(nil, []any{1, "Invalid parameter type"})
+				res(nil, invalidParameterTypeErr)
 				return
 			}
 			slog.Info("Request for opening serial port", "serial", address)
 			if address != cfg.SerialPortAddr {
-				res(nil, []any{1, "Invalid serial port address"})
+				res(nil, invalidSerialPortAddressErr)
 				return
 			}
 			serialOpened.L.Lock()
@@ -223,17 +226,17 @@ func startRouter(ctx context.Context, cfg Config) error {
 		f.Assert(err == nil, "Failed to register $/serial/open method")
 		err = router.RegisterMethod("$/serial/close", func(_ *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 			if len(params) != 1 {
-				res(nil, []any{1, "Invalid number of parameters"})
+				res(nil, invalidNumberOfParametersErr)
 				return
 			}
 			address, ok := params[0].(string)
 			if !ok {
-				res(nil, []any{1, "Invalid parameter type"})
+				res(nil, invalidParameterTypeErr)
 				return
 			}
 			slog.Info("Request for closing serial port", "serial", address)
 			if address != cfg.SerialPortAddr {
-				res(nil, []any{1, "Invalid serial port address"})
+				res(nil, invalidSerialPortAddressErr)
 				return
 			}
 			serialClosed.L.Lock()
@@ -249,7 +252,7 @@ func startRouter(ctx context.Context, cfg Config) error {
 		var stats serialStats
 		err = router.RegisterMethod("$/serial/stats", func(_ *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResponseHandler) {
 			if len(params) != 0 {
-				res(nil, []any{1, "Invalid number of parameters"})
+				res(nil, invalidNumberOfParametersErr)
 				return
 			}
 			res(stats.get(), nil)
@@ -453,13 +456,17 @@ type countingStream struct {
 
 func (c *countingStream) Read(p []byte) (int, error) {
 	n, err := c.ReadWriteCloser.Read(p)
-	c.stats.rxBytes.Add(uint64(n))
+	if n > 0 {
+		c.stats.rxBytes.Add(uint64(n))
+	}
 	return n, err
 }
 
 func (c *countingStream) Write(p []byte) (int, error) {
 	n, err := c.ReadWriteCloser.Write(p)
-	c.stats.txBytes.Add(uint64(n))
+	if n > 0 {
+		c.stats.txBytes.Add(uint64(n))
+	}
 	return n, err
 }
 

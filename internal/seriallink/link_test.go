@@ -41,11 +41,11 @@ func newLink(t *testing.T, p io.ReadWriteCloser) *Link {
 }
 
 func randomData(seed uint64, size int) []byte {
-	rng := rand.New(rand.NewPCG(seed, 0))
+	rng := rand.New(rand.NewPCG(seed, 0)) // #nosec G404 -- seeded, for reproducible test data
 	b := make([]byte, size)
 	for i := range b {
 		if rng.IntN(3) > 0 {
-			b[i] = byte(rng.Uint32())
+			b[i] = byte(rng.Uint32() & 0xFF)
 		}
 	}
 	return b
@@ -65,7 +65,7 @@ func exchange(t *testing.T, a, b *Link, size int) {
 	send := func(src io.Writer, data []byte) {
 		defer wg.Done()
 		// Write in random sized chunks, like an upper layer would do
-		rng := rand.New(rand.NewPCG(uint64(len(data)), 3))
+		rng := rand.New(rand.NewPCG(uint64(len(data)), 3)) // #nosec G404 -- seeded, for reproducible test data
 		for len(data) > 0 {
 			n := min(len(data), 1+rng.IntN(1000))
 			_, err := src.Write(data[:n])
@@ -127,8 +127,8 @@ func TestPeerStartsLater(t *testing.T) {
 
 	time.Sleep(200 * time.Millisecond)
 	select {
-	case <-writeDone:
-		require.Fail(t, "Write must block until the session is established")
+	case err := <-writeDone:
+		require.Fail(t, "Write must block until the session is established", "err: %v", err)
 	default:
 	}
 
@@ -266,7 +266,7 @@ func TestMsgpackRPCOverNoisyLine(t *testing.T) {
 	for i := range 8 {
 		wg.Go(func() {
 			for j := range 25 {
-				payload := randomData(uint64(i*100+j), 1+(i*j*97)%3000)
+				payload := randomData(uint64(i*100+j), 1+(i*j*97)%3000) // #nosec G115 -- i and j are never negative
 				res, reqErr, err := client.SendRequest(ctx, "echo", payload)
 				require.NoError(t, err)
 				require.Nil(t, reqErr)

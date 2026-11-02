@@ -27,7 +27,7 @@ func TestInteropAutoDetect(t *testing.T) {
 	}
 	line := noisyline.New(1)
 	port := line.OpenB()
-	cmd := exec.Command(bin)
+	cmd := exec.Command(bin) // #nosec G702 -- test peer executable is explicitly provided via SERIALLINK_PEER
 	stdin, err := cmd.StdinPipe()
 	require.NoError(t, err)
 	stdout, err := cmd.StdoutPipe()

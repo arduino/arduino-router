@@ -181,8 +181,8 @@ const (
 )
 
 func (p synParams) marshal(withEcho bool) []byte {
-	b := binary.LittleEndian.AppendUint16(nil, uint16(p.maxPayload))
-	b = append(b, uint8(p.window))
+	b := binary.LittleEndian.AppendUint16(nil, uint16(p.maxPayload)) // #nosec G115 -- at most MaxPayloadLimit
+	b = append(b, uint8(p.window))                                   // #nosec G115 -- at most MaxWindowLimit
 	b = binary.LittleEndian.AppendUint32(b, p.nonce)
 	if withEcho {
 		b = binary.LittleEndian.AppendUint32(b, p.echo)
