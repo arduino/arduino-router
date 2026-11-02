@@ -1,6 +1,9 @@
 /*
     Test sketch for the arduino-router.
 
+    SPDX-FileCopyrightText: Arduino s.r.l. and/or its affiliated companies
+    SPDX-License-Identifier: GPL-3.0-or-later
+
     - Sends "payload" notifications, carrying 250 bytes of binary data, at a
       rate that can be changed with the "set_payload_rate" method (initially
       DEFAULT_PAYLOAD_RATE notifications per second). The payload is filled
