@@ -3,6 +3,7 @@
 // SPDX-FileCopyrightText: Arduino s.r.l. and/or its affiliated companies
 // SPDX-License-Identifier: GPL-3.0-or-later
 
+//nolint:goconst
 package msgpackrpc
 
 import (
