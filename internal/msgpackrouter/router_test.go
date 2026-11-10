@@ -15,12 +15,12 @@ import (
 	"time"
 
 	"github.com/arduino/arduino-router/internal/msgpackrouter"
+	"github.com/arduino/arduino-router/msgpack"
 	"github.com/arduino/arduino-router/msgpackrpc"
 
 	"github.com/djherbis/buffer"
 	"github.com/djherbis/nio/v3"
 	"github.com/stretchr/testify/require"
-	"github.com/vmihailenco/msgpack/v5"
 )
 
 type FullPipe struct {
@@ -105,7 +105,7 @@ func TestBasicRouterFunctionality(t *testing.T) {
 		// Registering a method owned by another client fails
 		result, reqErr, err := cl2.SendRequest(context.Background(), "$/register", "ping")
 		require.Nil(t, result)
-		require.Equal(t, []any{int8(msgpackrouter.ErrCodeRouteAlreadyExists), "route already exists: ping"}, reqErr)
+		require.Equal(t, []any{msgpackrouter.ErrCodeRouteAlreadyExists, "route already exists: ping"}, reqErr)
 		require.NoError(t, err)
 	}
 	{
@@ -118,14 +118,14 @@ func TestBasicRouterFunctionality(t *testing.T) {
 	{
 		// Call from client2 the registered method on client1
 		result, reqErr, err := cl2.SendRequest(context.Background(), "ping", "1", 2, true)
-		require.Equal(t, []any{"1", int8(2), true}, result)
+		require.Equal(t, []any{"1", 2, true}, result)
 		require.Nil(t, reqErr)
 		require.NoError(t, err)
 	}
 	{
 		// Self-call from client1
 		result, reqErr, err := cl1.SendRequest(context.Background(), "ping", "c", 12, false)
-		require.Equal(t, []any{"c", int8(12), false}, result)
+		require.Equal(t, []any{"c", 12, false}, result)
 		require.Nil(t, reqErr)
 		require.NoError(t, err)
 	}
@@ -133,7 +133,7 @@ func TestBasicRouterFunctionality(t *testing.T) {
 		// Call from client2 an un-registered method
 		result, reqErr, err := cl2.SendRequest(context.Background(), "not-existent-method", "1", 2, true)
 		require.Nil(t, result)
-		require.Equal(t, []any{int8(msgpackrouter.ErrCodeMethodNotAvailable), "method not-existent-method not available"}, reqErr)
+		require.Equal(t, []any{msgpackrouter.ErrCodeMethodNotAvailable, "method not-existent-method not available"}, reqErr)
 		require.NoError(t, err)
 	}
 	{
@@ -188,21 +188,21 @@ func TestUnregisterMethod(t *testing.T) {
 		// The second client cannot unregister a method it does not own
 		result, reqErr, err := cl2.SendRequest(context.Background(), "$/unregister", "ping")
 		require.Nil(t, result)
-		require.Equal(t, []any{int8(msgpackrouter.ErrCodeGenericError), "route not registered by this client: ping"}, reqErr)
+		require.Equal(t, []any{msgpackrouter.ErrCodeGenericError, "route not registered by this client: ping"}, reqErr)
 		require.NoError(t, err)
 	}
 	{
 		// Unregistering a method that was never registered fails the same way
 		result, reqErr, err := cl1.SendRequest(context.Background(), "$/unregister", "pong")
 		require.Nil(t, result)
-		require.Equal(t, []any{int8(msgpackrouter.ErrCodeGenericError), "route not registered by this client: pong"}, reqErr)
+		require.Equal(t, []any{msgpackrouter.ErrCodeGenericError, "route not registered by this client: pong"}, reqErr)
 		require.NoError(t, err)
 	}
 	{
 		// Invalid params are rejected
 		result, reqErr, err := cl1.SendRequest(context.Background(), "$/unregister", 42)
 		require.Nil(t, result)
-		require.Equal(t, []any{int8(msgpackrouter.ErrCodeInvalidParams), "invalid params: expected string, got int8"}, reqErr)
+		require.Equal(t, []any{msgpackrouter.ErrCodeInvalidParams, "invalid params: expected string, got int"}, reqErr)
 		require.NoError(t, err)
 	}
 	{
@@ -216,7 +216,7 @@ func TestUnregisterMethod(t *testing.T) {
 		// The method is no longer routed
 		result, reqErr, err := cl2.SendRequest(context.Background(), "ping", 1)
 		require.Nil(t, result)
-		require.Equal(t, []any{int8(msgpackrouter.ErrCodeMethodNotAvailable), "method ping not available"}, reqErr)
+		require.Equal(t, []any{msgpackrouter.ErrCodeMethodNotAvailable, "method ping not available"}, reqErr)
 		require.NoError(t, err)
 	}
 	{
@@ -320,7 +320,7 @@ func TestRouterMaxMsgSize(t *testing.T) {
 	{
 		result, reqErr, err := cl1.SendRequest(context.Background(), "$/setMaxMsgSize", 20)
 		require.Nil(t, result)
-		require.Equal(t, []any{int8(1), "invalid params: max buffer size must be greater than 127"}, reqErr)
+		require.Equal(t, []any{1, "invalid params: max buffer size must be greater than 127"}, reqErr)
 		require.NoError(t, err)
 	}
 	{
@@ -334,7 +334,7 @@ func TestRouterMaxMsgSize(t *testing.T) {
 	{
 		result, reqErr, err := cl2.SendRequest(context.Background(), "n", string(make([]byte, 160)))
 		require.Nil(t, result)
-		require.Equal(t, []any{int8(6), "message size exceeds the limit"}, reqErr)
+		require.Equal(t, []any{6, "message size exceeds the limit"}, reqErr)
 		require.NoError(t, err)
 	}
 	{
@@ -351,7 +351,7 @@ func TestRouterMaxMsgSize(t *testing.T) {
 	{
 		result, reqErr, err := cl2.SendRequest(context.Background(), "y")
 		require.Nil(t, result)
-		require.Equal(t, []any{int8(6), "message size exceeds the limit"}, reqErr)
+		require.Equal(t, []any{6, "message size exceeds the limit"}, reqErr)
 		require.NoError(t, err)
 	}
 }
@@ -387,7 +387,7 @@ func TestRouterKeepsParamaterUnchanged(t *testing.T) {
 			}
 		]
 	*/
-	complicatedObject := msgpack.RawMessage{
+	complicatedObject := msgpack.NewRawMessage(
 		0x91, 0x87, 0xA3, 0x69, 0x6E, 0x74, 0x01, 0xA5, 0x66, 0x6C, 0x6F,
 		0x61, 0x74, 0xCB, 0x3F, 0xE0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0xA7, 0x62, 0x6F, 0x6F, 0x6C, 0x65, 0x61, 0x6E, 0xC3, 0xA4, 0x6E,
@@ -397,33 +397,34 @@ func TestRouterKeepsParamaterUnchanged(t *testing.T) {
 		0x72, 0xA6, 0x6F, 0x62, 0x6A, 0x65, 0x63, 0x74, 0x82, 0xA3, 0x66,
 		0x6F, 0x6F, 0x01, 0xA3, 0x62, 0x61, 0x7A, 0xCB, 0x3F, 0xE0, 0x00,
 		0x00, 0x00, 0x00, 0x00, 0x00,
-	}
+	)
 
 	// Register "test" method on cl2
-	w2 := msgpack.NewEncoder(ch2a)
-	r2 := msgpack.NewDecoder(ch2a)
-	require.NoError(t, w2.Encode([]any{0, 1, "$/register", []any{"test"}}))
-	resp, err := r2.DecodeSlice()
+	require.NoError(t, msgpack.Encode([]any{0, 1, "$/register", []any{"test"}}, ch2a))
+	resp, err := msgpack.Unmarshal(ch2a)
 	require.NoError(t, err)
-	require.Equal(t, []any{int8(1), int8(1), nil, true}, resp) // Check that the registration succeeded
+	require.Equal(t, []any{1, 1, nil, true}, resp) // Check that the registration succeeded
 
 	for range 10 {
 		// Send notitication from cl1 to cl2 with the complicated object as parameter
-		w1 := msgpack.NewEncoder(ch1a)
-		r1 := msgpack.NewDecoder(ch2a)
-		require.NoError(t, w1.Encode([]any{2, "test", complicatedObject}))
+		require.NoError(t, msgpack.Encode([]any{2, "test", complicatedObject}, ch1a))
 
 		// Check that cl2 receives the notification with the exact same bytes
-		l, err := r1.DecodeArrayLen() // Decode the array header
+		_, k, l, _, err := msgpack.DecodeSingle(ch2a)
 		require.NoError(t, err)
-		require.Equal(t, 3, l)
-		code, err := r1.DecodeInt() // Decode the code (2 == NOTIFICATION)
+		require.Equal(t, k, msgpack.ValueKindArray)
+		require.Equal(t, 3, int(l))
+		code, err := msgpack.Unmarshal(ch2a) // Decode the code (2 == NOTIFICATION)
 		require.NoError(t, err)
-		require.Equal(t, 2, code)
-		method, err := r1.DecodeString() // Decode the method
+		codevalue, ok := msgpack.ToInt(code)
+		require.True(t, ok)
+		require.Equal(t, 2, codevalue)
+		method, err := msgpack.Unmarshal(ch2a) // Decode the method
 		require.NoError(t, err)
-		require.Equal(t, "test", method)
-		params, err := r1.DecodeRaw() // Decode the parameters as raw bytes
+		methodvalue, ok := msgpack.ToString(method)
+		require.True(t, ok)
+		require.Equal(t, "test", methodvalue)
+		params, err := msgpack.DecodeRaw(ch2a) // Decode the parameters as raw bytes
 		require.NoError(t, err)
 		require.Equal(t, complicatedObject, params) // Check that the parameters are exactly the same bytes as we sent
 	}

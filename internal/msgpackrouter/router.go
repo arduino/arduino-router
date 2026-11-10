@@ -14,8 +14,7 @@ import (
 	"maps"
 	"sync"
 
-	"github.com/vmihailenco/msgpack/v5"
-
+	"github.com/arduino/arduino-router/msgpack"
 	"github.com/arduino/arduino-router/msgpackrpc"
 )
 
@@ -79,7 +78,7 @@ func (r *rawParams) Get() []any {
 	r.decoded = make([]any, len(r.raw))
 	for i, p := range r.raw {
 		if raw, ok := p.(msgpack.RawMessage); ok {
-			_ = msgpack.Unmarshal(raw, &r.decoded[i])
+			r.decoded[i] = raw.Unmarshal()
 		} else {
 			r.decoded[i] = p
 		}
