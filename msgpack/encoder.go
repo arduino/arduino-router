@@ -267,6 +267,19 @@ func Encode(val any, out io.Writer) error {
 			}
 		}
 		return nil
+	case reflect.Uint:
+		return Encode(uint64(reflectVal.Uint()), out)
+	}
+
+	// Unwrap type that are alias of base types like `type MyString string`
+	if reflectVal.Kind() == reflect.Pointer {
+		reflectVal = reflectVal.Elem()
+	}
+	if reflectVal.Kind() == reflect.String {
+		return Encode(reflectVal.String(), out)
+	}
+	if reflectVal.Kind() == reflect.Slice && reflectVal.Type().Elem().Kind() == reflect.Uint8 {
+		return Encode(reflectVal.Bytes(), out)
 	}
 
 	return fmt.Errorf("unsupported type: %T", val)

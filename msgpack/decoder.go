@@ -314,3 +314,138 @@ func Decode(in io.Reader) (Value, error) {
 	}
 	return nil, fmt.Errorf("unsupported msgpack type 0x%02x", k)
 }
+
+// Unmarshalling functions
+
+func Unmarshal(in io.Reader) (any, error) {
+	v, err := Decode(in)
+	if err != nil {
+		return nil, err
+	}
+	return unmarshal(v), nil
+}
+
+func unmarshal(v Value) any {
+	switch v := v.(type) {
+	case Integer:
+		if val, ok := v.Int(); ok {
+			return val
+		}
+		val, _ := v.Uint()
+		return val
+	case String:
+		return string(v)
+	case Array:
+		res := make([]any, len(v))
+		for i, item := range v {
+			res[i] = unmarshal(item)
+		}
+		return res
+	case Map:
+		res := make(map[any]any)
+		for k, val := range v.Iterate() {
+			kind := k.Kind()
+			if kind == ValueKindMap || kind == ValueKindArray || kind == ValueKindExtension {
+				// Return the original map if it has non-unmarshallable keys
+				return v
+			}
+			res[unmarshal(k)] = unmarshal(val)
+		}
+		return res
+	case Bool:
+		return bool(v)
+	case Nil:
+		return nil
+	case Binary:
+		return []byte(v)
+	case Extension:
+		return v
+	case Float32:
+		return float32(v)
+	case Float64:
+		return float64(v)
+	default:
+		panic("unsupported value type in unmarshal")
+	}
+}
+
+func ToInt(v any) (int, bool) {
+	switch v := v.(type) {
+	case Integer:
+		return v.Int()
+	case int:
+		return v, true
+	case int8:
+		return int(v), true
+	case int16:
+		return int(v), true
+	case int32:
+		return int(v), true
+	case int64:
+		return int(v), true
+	case uint:
+		return int(v), v <= math.MaxInt
+	case uint8:
+		return int(v), true
+	case uint16:
+		return int(v), true
+	case uint32:
+		return int(v), uint(v) <= math.MaxInt
+	case uint64:
+		return int(v), v <= math.MaxInt
+	}
+	return 0, false
+}
+
+func ToUint(v any) (uint, bool) {
+	switch v := v.(type) {
+	case Integer:
+		return v.Uint()
+	case uint:
+		return v, true
+	case uint8:
+		return uint(v), true
+	case uint16:
+		return uint(v), true
+	case uint32:
+		return uint(v), true
+	case uint64:
+		return uint(v), true
+	case int:
+		if v < 0 {
+			return 0, false
+		}
+		return uint(v), true
+	case int8:
+		if v < 0 {
+			return 0, false
+		}
+		return uint(v), true
+	case int16:
+		if v < 0 {
+			return 0, false
+		}
+		return uint(v), true
+	case int32:
+		if v < 0 {
+			return 0, false
+		}
+		return uint(v), true
+	case int64:
+		if v < 0 {
+			return 0, false
+		}
+		return uint(v), true
+	}
+	return 0, false
+}
+
+func ToString(v any) (string, bool) {
+	switch v := v.(type) {
+	case String:
+		return string(v), true
+	case string:
+		return v, true
+	}
+	return "", false
+}

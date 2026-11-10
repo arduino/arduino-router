@@ -120,6 +120,14 @@ func (i Integer) Int() (int, bool) {
 	return int(i.i64), true
 }
 
+// Uint returns the integer as uint if possible.
+func (i Integer) Uint() (uint, bool) {
+	if i.u64 != 0 {
+		return uint(i.u64), i.u64 <= math.MaxUint
+	}
+	return uint(i.i64), i.i64 >= 0 && i.i64 <= math.MaxInt
+}
+
 // Int64 returns the integer as int64 if possible.
 func (i Integer) Int64() (int64, bool) {
 	if i.u64 != 0 {
