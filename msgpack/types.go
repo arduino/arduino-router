@@ -6,6 +6,7 @@
 package msgpack
 
 import (
+	"bytes"
 	"encoding/hex"
 	"fmt"
 	"iter"
@@ -29,6 +30,7 @@ const (
 	ValueKindArray
 	ValueKindMap
 	ValueKindExtension
+	ValueKindRaw
 )
 
 // Value represents a MessagePack value.
@@ -359,4 +361,36 @@ func (e Extension) String() string {
 
 func (e Extension) hash() mapHashableKey {
 	return fmt.Sprintf("E:%02X:%s", e.Type, hex.EncodeToString(e.Data))
+}
+
+// RawMessage represents a raw message value.
+type RawMessage struct {
+	data []byte
+}
+
+// NewRawMessage creates a new RawMessage with the given data.
+func NewRawMessage(data ...byte) RawMessage {
+	return RawMessage{data: data}
+}
+
+func (RawMessage) Kind() ValueKind {
+	return ValueKindRaw
+}
+
+func (r RawMessage) String() string {
+	return fmt.Sprintf("Raw(%s)", hex.EncodeToString(r.data))
+}
+
+func (r RawMessage) hash() mapHashableKey {
+	panic("RawMessage cannot be used as a map key")
+}
+
+func (r RawMessage) Unmarshal() any {
+	v, _ := Unmarshal(bytes.NewBuffer(r.data))
+	return v
+}
+
+func (r RawMessage) Decode() any {
+	v, _ := Decode(bytes.NewBuffer(r.data))
+	return v
 }

@@ -236,6 +236,9 @@ func Encode(val any, out io.Writer) error {
 			}
 		}
 		return nil
+	case RawMessage:
+		_, err := out.Write(v.data)
+		return err
 	}
 
 	// Detect if the value is a typed map or a typed array by reflection, and encode it.
