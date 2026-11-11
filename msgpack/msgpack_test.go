@@ -8,6 +8,8 @@ package msgpack_test
 import (
 	"bytes"
 	"errors"
+	"io"
+	"math"
 	"strings"
 	"testing"
 
@@ -1344,6 +1346,10 @@ func TestDecodeIncompleteExtensionTypes(t *testing.T) {
 		in = bytes.NewBuffer([]byte{0xc8, 0x00}) // incomplete length
 		_, err = msgpack.Decode(in)
 		require.Error(t, err)
+
+		in = bytes.NewBuffer([]byte{0xc8, 0x00, 0x03}) // missing type and data
+		_, err = msgpack.Decode(in)
+		require.Error(t, err)
 	})
 
 	t.Run("IncompleteExt32", func(t *testing.T) {
@@ -1352,6 +1358,10 @@ func TestDecodeIncompleteExtensionTypes(t *testing.T) {
 		require.Error(t, err)
 
 		in = bytes.NewBuffer([]byte{0xc9, 0x00, 0x00}) // incomplete length
+		_, err = msgpack.Decode(in)
+		require.Error(t, err)
+
+		in = bytes.NewBuffer([]byte{0xc9, 0x00, 0x00, 0x00, 0x03}) // missing type and data
 		_, err = msgpack.Decode(in)
 		require.Error(t, err)
 	})
@@ -1402,4 +1412,423 @@ func TestMapIterateEarlyExit(t *testing.T) {
 		break // triggers yield returning false → exercises the early-exit path
 	}
 	require.Equal(t, 1, count)
+}
+
+// failAfterWriter is an io.Writer that accepts the given number of writes
+// and fails all the subsequent ones.
+type failAfterWriter struct{ writes int }
+
+func (w *failAfterWriter) Write(p []byte) (int, error) {
+	if w.writes <= 0 {
+		return 0, errors.New("write error")
+	}
+	w.writes--
+	return len(p), nil
+}
+
+func TestEncodeNestedErrors(t *testing.T) {
+	unsupported := struct{}{}
+
+	t.Run("UnsupportedNestedElements", func(t *testing.T) {
+		_, err := msgpack.Marshal([]any{unsupported})
+		require.Error(t, err)
+		_, err = msgpack.Marshal(map[any]any{unsupported: 1})
+		require.Error(t, err)
+		_, err = msgpack.Marshal(map[any]any{"k": unsupported})
+		require.Error(t, err)
+		_, err = msgpack.Marshal(map[string]any{"k": unsupported})
+		require.Error(t, err)
+		_, err = msgpack.Marshal(map[struct{}]int{{}: 1})
+		require.Error(t, err)
+		_, err = msgpack.Marshal([]struct{}{{}})
+		require.Error(t, err)
+	})
+
+	t.Run("WriteErrorAfterHeader", func(t *testing.T) {
+		require.Error(t, msgpack.Encode("hello", failWriter{}))
+		require.Error(t, msgpack.Encode("hello", &failAfterWriter{writes: 1}))
+		require.Error(t, msgpack.Encode(msgpack.NewString("hello"), &failAfterWriter{writes: 1}))
+		require.Error(t, msgpack.Encode(msgpack.Binary{0x01}, &failAfterWriter{writes: 1}))
+		require.Error(t, msgpack.Encode([]byte{0x01}, &failAfterWriter{writes: 1}))
+		require.Error(t, msgpack.Encode(msgpack.Array{msgpack.NewNil()}, &failAfterWriter{writes: 1}))
+
+		m := msgpack.NewMap()
+		m.Set(msgpack.NewString("k"), msgpack.NewNil())
+		require.Error(t, msgpack.Encode(m, &failAfterWriter{writes: 1})) // fails on key header
+		require.Error(t, msgpack.Encode(m, &failAfterWriter{writes: 3})) // fails on value
+	})
+}
+
+type myUint uint
+type myString string
+
+func TestEncodeAliasAndPointerTypes(t *testing.T) {
+	e, err := msgpack.Marshal(myUint(300))
+	require.NoError(t, err)
+	require.Equal(t, []byte{0xd1, 0x01, 0x2c}, e)
+
+	e, err = msgpack.Marshal(myString("ab"))
+	require.NoError(t, err)
+	require.Equal(t, []byte{0xa2, 'a', 'b'}, e)
+
+	s := "ab"
+	e, err = msgpack.Marshal(&s)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0xa2, 'a', 'b'}, e)
+
+	b := []byte{0x01}
+	e, err = msgpack.Marshal(&b)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0xc4, 0x01, 0x01}, e)
+
+	i := 1
+	_, err = msgpack.Marshal(&i)
+	require.Error(t, err)
+}
+
+func TestDecodeSingle(t *testing.T) {
+	maxUint64 := uint64(math.MaxUint64)
+	tests := []struct {
+		name  string
+		in    []byte
+		kind  msgpack.ValueKind
+		count uint
+		value msgpack.Value
+	}{
+		{"PositiveFixInt", []byte{0x05}, msgpack.ValueKindInteger, 0, msgpack.NewInteger(5)},
+		{"FixMap", []byte{0x82}, msgpack.ValueKindMap, 2, nil},
+		{"FixArray", []byte{0x93}, msgpack.ValueKindArray, 3, nil},
+		{"FixStr", []byte{0xa3}, msgpack.ValueKindString, 3, nil},
+		{"Nil", []byte{0xc0}, msgpack.ValueKindNil, 0, msgpack.NewNil()},
+		{"False", []byte{0xc2}, msgpack.ValueKindBool, 0, msgpack.False},
+		{"True", []byte{0xc3}, msgpack.ValueKindBool, 0, msgpack.True},
+		{"Bin8", []byte{0xc4, 0x05}, msgpack.ValueKindBinary, 5, nil},
+		{"Bin16", []byte{0xc5, 0x01, 0x00}, msgpack.ValueKindBinary, 256, nil},
+		{"Bin32", []byte{0xc6, 0x00, 0x01, 0x00, 0x00}, msgpack.ValueKindBinary, 65536, nil},
+		{"Ext8", []byte{0xc7, 0x03}, msgpack.ValueKindExtension, 4, nil},
+		{"Ext16", []byte{0xc8, 0x01, 0x00}, msgpack.ValueKindExtension, 257, nil},
+		{"Ext32", []byte{0xc9, 0x00, 0x01, 0x00, 0x00}, msgpack.ValueKindExtension, 65537, nil},
+		{"Float32", []byte{0xca, 0x3f, 0xc0, 0x00, 0x00}, msgpack.ValueKindFloat32, 0, msgpack.NewFloat32(1.5)},
+		{"Float64", []byte{0xcb, 0x3f, 0xf8, 0, 0, 0, 0, 0, 0}, msgpack.ValueKindFloat64, 0, msgpack.NewFloat64(1.5)},
+		{"Uint8", []byte{0xcc, 0xff}, msgpack.ValueKindInteger, 0, msgpack.NewInteger(255)},
+		{"Uint16", []byte{0xcd, 0x01, 0x00}, msgpack.ValueKindInteger, 0, msgpack.NewInteger(256)},
+		{"Uint32", []byte{0xce, 0x00, 0x01, 0x00, 0x00}, msgpack.ValueKindInteger, 0, msgpack.NewInteger(65536)},
+		{"Uint64", []byte{0xcf, 0, 0, 0, 0, 0, 0, 0, 0x01}, msgpack.ValueKindInteger, 0, msgpack.NewInteger(1)},
+		{"Uint64Max", []byte{0xcf, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}, msgpack.ValueKindInteger, 0, msgpack.NewInteger(maxUint64)},
+		{"Int8", []byte{0xd0, 0xff}, msgpack.ValueKindInteger, 0, msgpack.NewInteger(-1)},
+		{"Int16", []byte{0xd1, 0xff, 0xfe}, msgpack.ValueKindInteger, 0, msgpack.NewInteger(-2)},
+		{"Int32", []byte{0xd2, 0xff, 0xff, 0xff, 0xfd}, msgpack.ValueKindInteger, 0, msgpack.NewInteger(-3)},
+		{"Int64", []byte{0xd3, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfc}, msgpack.ValueKindInteger, 0, msgpack.NewInteger(-4)},
+		{"FixExt1", []byte{0xd4}, msgpack.ValueKindExtension, 2, nil},
+		{"FixExt2", []byte{0xd5}, msgpack.ValueKindExtension, 3, nil},
+		{"FixExt4", []byte{0xd6}, msgpack.ValueKindExtension, 5, nil},
+		{"FixExt8", []byte{0xd7}, msgpack.ValueKindExtension, 9, nil},
+		{"FixExt16", []byte{0xd8}, msgpack.ValueKindExtension, 17, nil},
+		{"Str8", []byte{0xd9, 0x20}, msgpack.ValueKindString, 32, nil},
+		{"Str16", []byte{0xda, 0x01, 0x00}, msgpack.ValueKindString, 256, nil},
+		{"Str32", []byte{0xdb, 0x00, 0x01, 0x00, 0x00}, msgpack.ValueKindString, 65536, nil},
+		{"Array16", []byte{0xdc, 0x00, 0x10}, msgpack.ValueKindArray, 16, nil},
+		{"Array32", []byte{0xdd, 0x00, 0x01, 0x00, 0x00}, msgpack.ValueKindArray, 65536, nil},
+		{"Map16", []byte{0xde, 0x00, 0x10}, msgpack.ValueKindMap, 16, nil},
+		{"Map32", []byte{0xdf, 0x00, 0x01, 0x00, 0x00}, msgpack.ValueKindMap, 65536, nil},
+		{"NegativeFixInt", []byte{0xe0}, msgpack.ValueKindInteger, 0, msgpack.NewInteger(-32)},
+		{"NegativeFixIntMinusOne", []byte{0xff}, msgpack.ValueKindInteger, 0, msgpack.NewInteger(-1)},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Append a sentinel byte to check that DecodeSingle doesn't over-read
+			in := bytes.NewBuffer(append(append([]byte{}, tt.in...), 0xaa))
+			readBytes, kind, count, value, err := msgpack.DecodeSingle(in)
+			require.NoError(t, err)
+			require.Equal(t, tt.in, readBytes)
+			require.Equal(t, tt.kind, kind)
+			require.Equal(t, tt.count, count)
+			require.Equal(t, tt.value, value)
+			require.Equal(t, []byte{0xaa}, in.Bytes())
+		})
+	}
+
+	t.Run("Reserved", func(t *testing.T) {
+		readBytes, _, _, _, err := msgpack.DecodeSingle(bytes.NewBuffer([]byte{0xc1}))
+		require.Error(t, err)
+		require.Equal(t, []byte{0xc1}, readBytes)
+	})
+
+	t.Run("Empty", func(t *testing.T) {
+		readBytes, _, _, _, err := msgpack.DecodeSingle(bytes.NewBuffer(nil))
+		require.ErrorIs(t, err, io.EOF)
+		require.Empty(t, readBytes)
+	})
+
+	t.Run("Truncated", func(t *testing.T) {
+		for _, tt := range tests {
+			for l := 1; l < len(tt.in); l++ {
+				readBytes, _, _, _, err := msgpack.DecodeSingle(bytes.NewBuffer(tt.in[:l]))
+				require.Error(t, err, "%s truncated at %d", tt.name, l)
+				// Only the type byte has been consumed successfully
+				require.Equal(t, tt.in[:1], readBytes, "%s truncated at %d", tt.name, l)
+			}
+		}
+	})
+}
+
+func TestDecodeSingleThenSkip(t *testing.T) {
+	// This is the "peek and skip" pattern used by the RPC layer
+	for _, msg := range completeMessages() {
+		in := bytes.NewBuffer(append(append([]byte{}, msg...), 0xaa))
+		peek, _, _, _, err := msgpack.DecodeSingle(in)
+		require.NoError(t, err)
+		require.NoError(t, msgpack.Skip(io.MultiReader(bytes.NewBuffer(peek), in)), "%x", msg)
+		require.Equal(t, []byte{0xaa}, in.Bytes(), "%x", msg)
+	}
+}
+
+// completeMessages returns a set of well-formed messages covering all the
+// MessagePack types.
+func completeMessages() [][]byte {
+	longString, err := msgpack.Marshal(strings.Repeat("x", 3000))
+	if err != nil {
+		panic(err)
+	}
+	return [][]byte{
+		{0x05},
+		{0xe0},
+		{0xc0},
+		{0xc2},
+		{0xc3},
+		{0xc4, 0x02, 0x01, 0x02},
+		{0xc5, 0x00, 0x02, 0x01, 0x02},
+		{0xc6, 0x00, 0x00, 0x00, 0x02, 0x01, 0x02},
+		{0xc7, 0x02, 0x09, 0x01, 0x02},
+		{0xc8, 0x00, 0x02, 0x09, 0x01, 0x02},
+		{0xc9, 0x00, 0x00, 0x00, 0x02, 0x09, 0x01, 0x02},
+		{0xca, 0x3f, 0xc0, 0x00, 0x00},
+		{0xcb, 0x3f, 0xf8, 0, 0, 0, 0, 0, 0},
+		{0xcc, 0x01},
+		{0xcd, 0x00, 0x01},
+		{0xce, 0x00, 0x00, 0x00, 0x01},
+		{0xcf, 0, 0, 0, 0, 0, 0, 0, 0x01},
+		{0xd0, 0x01},
+		{0xd1, 0x00, 0x01},
+		{0xd2, 0x00, 0x00, 0x00, 0x01},
+		{0xd3, 0, 0, 0, 0, 0, 0, 0, 0x01},
+		{0xd4, 0x01, 0x01},
+		{0xd5, 0x01, 0x01, 0x02},
+		{0xd6, 0x01, 0x01, 0x02, 0x03, 0x04},
+		append([]byte{0xd7, 0x01}, bytes.Repeat([]byte{0x01}, 8)...),
+		append([]byte{0xd8, 0x01}, bytes.Repeat([]byte{0x01}, 16)...),
+		{0xa2, 'h', 'i'},
+		{0xd9, 0x02, 'h', 'i'},
+		{0xda, 0x00, 0x02, 'h', 'i'},
+		{0xdb, 0x00, 0x00, 0x00, 0x02, 'h', 'i'},
+		{0x92, 0x01, 0xa1, 'a'},
+		{0xdc, 0x00, 0x02, 0x01, 0x02},
+		{0xdd, 0x00, 0x00, 0x00, 0x02, 0x01, 0x02},
+		{0x81, 0xa1, 'k', 0x91, 0xc0},
+		{0xde, 0x00, 0x01, 0x01, 0x02},
+		{0xdf, 0x00, 0x00, 0x00, 0x01, 0x01, 0x02},
+		longString, // str16 bigger than the internal skip buffer
+	}
+}
+
+func TestSkipAndDecodeRaw(t *testing.T) {
+	t.Run("Complete", func(t *testing.T) {
+		for _, msg := range completeMessages() {
+			in := bytes.NewBuffer(append(append([]byte{}, msg...), 0xaa))
+			require.NoError(t, msgpack.Skip(in), "%x", msg)
+			require.Equal(t, []byte{0xaa}, in.Bytes(), "%x", msg)
+
+			in = bytes.NewBuffer(append(append([]byte{}, msg...), 0xaa))
+			raw, err := msgpack.DecodeRaw(in)
+			require.NoError(t, err, "%x", msg)
+			require.Equal(t, []byte{0xaa}, in.Bytes(), "%x", msg)
+			encoded, err := msgpack.Marshal(raw)
+			require.NoError(t, err)
+			require.Equal(t, msg, encoded)
+		}
+	})
+
+	t.Run("Truncated", func(t *testing.T) {
+		for _, msg := range completeMessages() {
+			for l := range len(msg) {
+				require.Error(t, msgpack.Skip(bytes.NewBuffer(msg[:l])), "%x truncated at %d", msg, l)
+				_, err := msgpack.DecodeRaw(bytes.NewBuffer(msg[:l]))
+				require.Error(t, err, "%x truncated at %d", msg, l)
+			}
+		}
+	})
+
+	t.Run("Reserved", func(t *testing.T) {
+		require.Error(t, msgpack.Skip(bytes.NewBuffer([]byte{0xc1})))
+		require.Error(t, msgpack.Skip(bytes.NewBuffer([]byte{0x91, 0xc1})))
+		_, err := msgpack.DecodeRaw(bytes.NewBuffer([]byte{0x81, 0x01, 0xc1}))
+		require.Error(t, err)
+	})
+}
+
+func TestRawMessage(t *testing.T) {
+	raw := msgpack.NewRawMessage(0x93, 0x01, 0x02, 0x03)
+	require.Equal(t, msgpack.ValueKindRaw, raw.Kind())
+	require.Equal(t, "Raw(93010203)", raw.String())
+	require.Equal(t, msgpack.Array{msgpack.NewInteger(1), msgpack.NewInteger(2), msgpack.NewInteger(3)}, raw.Decode())
+	require.Equal(t, []any{1, 2, 3}, raw.Unmarshal())
+
+	// Invalid content
+	invalid := msgpack.NewRawMessage(0xc1)
+	require.Nil(t, invalid.Decode())
+	require.Nil(t, invalid.Unmarshal())
+
+	// RawMessage is embedded verbatim when encoded
+	e, err := msgpack.Marshal([]any{msgpack.NewRawMessage(0xc3), 1})
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x92, 0xc3, 0x01}, e)
+	require.Error(t, msgpack.Encode(raw, failWriter{}))
+
+	// RawMessage can't be used as map key
+	require.Panics(t, func() {
+		m := msgpack.NewMap()
+		m.Set(raw, msgpack.NewNil())
+	})
+}
+
+func TestUnmarshal(t *testing.T) {
+	unmarshal := func(t *testing.T, in []byte) any {
+		v, err := msgpack.Unmarshal(bytes.NewBuffer(in))
+		require.NoError(t, err)
+		return v
+	}
+
+	require.Equal(t, 5, unmarshal(t, []byte{0x05}))
+	require.Equal(t, -1, unmarshal(t, []byte{0xff}))
+	require.Equal(t, uint(math.MaxUint64), unmarshal(t, []byte{0xcf, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}))
+	require.Equal(t, "hi", unmarshal(t, []byte{0xa2, 'h', 'i'}))
+	require.Equal(t, true, unmarshal(t, []byte{0xc3}))
+	require.Equal(t, false, unmarshal(t, []byte{0xc2}))
+	require.Nil(t, unmarshal(t, []byte{0xc0}))
+	require.Equal(t, []byte{0x01, 0x02}, unmarshal(t, []byte{0xc4, 0x02, 0x01, 0x02}))
+	require.Equal(t, float32(1.5), unmarshal(t, []byte{0xca, 0x3f, 0xc0, 0x00, 0x00}))
+	require.Equal(t, float64(1.5), unmarshal(t, []byte{0xcb, 0x3f, 0xf8, 0, 0, 0, 0, 0, 0}))
+	require.Equal(t,
+		msgpack.Extension{Type: 1, Data: []byte{0x02}},
+		unmarshal(t, []byte{0xd4, 0x01, 0x02}))
+	require.Equal(t,
+		[]any{1, "a", []any{nil}},
+		unmarshal(t, []byte{0x93, 0x01, 0xa1, 'a', 0x91, 0xc0}))
+	require.Equal(t,
+		map[any]any{"a": 1, 2: []any{true}},
+		unmarshal(t, []byte{0x82, 0xa1, 'a', 0x01, 0x02, 0x91, 0xc3}))
+
+	// Maps with keys not representable as Go map keys are returned as msgpack.Map
+	for _, in := range [][]byte{
+		{0x81, 0x90, 0x01},             // array key
+		{0x81, 0x80, 0x01},             // map key
+		{0x81, 0xd4, 0x01, 0x02, 0x01}, // extension key
+	} {
+		v := unmarshal(t, in)
+		m, ok := v.(msgpack.Map)
+		require.True(t, ok, "%x", in)
+		require.Equal(t, 1, m.Len())
+	}
+
+	// Errors
+	_, err := msgpack.Unmarshal(bytes.NewBuffer(nil))
+	require.Error(t, err)
+	_, err = msgpack.Unmarshal(bytes.NewBuffer([]byte{0x92, 0x01}))
+	require.Error(t, err)
+}
+
+func TestIntegerUint(t *testing.T) {
+	v, ok := msgpack.NewInteger(5).Uint()
+	require.True(t, ok)
+	require.Equal(t, uint(5), v)
+
+	_, ok = msgpack.NewInteger(-1).Uint()
+	require.False(t, ok)
+
+	v, ok = msgpack.NewInteger(uint64(math.MaxUint64)).Uint()
+	require.True(t, ok)
+	require.Equal(t, uint(math.MaxUint64), v)
+}
+
+func TestToInt(t *testing.T) {
+	tests := []struct {
+		in  any
+		out int
+		ok  bool
+	}{
+		{msgpack.NewInteger(-5), -5, true},
+		{msgpack.NewInteger(uint64(math.MaxUint64)), -1, false},
+		{int(-1), -1, true},
+		{int8(-2), -2, true},
+		{int16(-3), -3, true},
+		{int32(-4), -4, true},
+		{int64(-5), -5, true},
+		{uint(6), 6, true},
+		{uint(math.MaxUint), -1, false},
+		{uint8(7), 7, true},
+		{uint16(8), 8, true},
+		{uint32(math.MaxUint32), math.MaxUint32, true},
+		{uint64(10), 10, true},
+		{uint64(math.MaxUint64), -1, false},
+		{"5", 0, false},
+		{nil, 0, false},
+		{1.0, 0, false},
+	}
+	for _, tt := range tests {
+		out, ok := msgpack.ToInt(tt.in)
+		require.Equal(t, tt.ok, ok, "%T(%v)", tt.in, tt.in)
+		if ok {
+			require.Equal(t, tt.out, out, "%T(%v)", tt.in, tt.in)
+		}
+	}
+}
+
+func TestToUint(t *testing.T) {
+	tests := []struct {
+		in  any
+		out uint
+		ok  bool
+	}{
+		{msgpack.NewInteger(5), 5, true},
+		{msgpack.NewInteger(-5), 0, false},
+		{uint(1), 1, true},
+		{uint8(2), 2, true},
+		{uint16(3), 3, true},
+		{uint32(4), 4, true},
+		{uint64(math.MaxUint64), math.MaxUint64, true},
+		{int(6), 6, true},
+		{int(-6), 0, false},
+		{int8(7), 7, true},
+		{int8(-7), 0, false},
+		{int16(8), 8, true},
+		{int16(-8), 0, false},
+		{int32(9), 9, true},
+		{int32(-9), 0, false},
+		{int64(10), 10, true},
+		{int64(-10), 0, false},
+		{"5", 0, false},
+		{nil, 0, false},
+	}
+	for _, tt := range tests {
+		out, ok := msgpack.ToUint(tt.in)
+		require.Equal(t, tt.ok, ok, "%T(%v)", tt.in, tt.in)
+		if ok {
+			require.Equal(t, tt.out, out, "%T(%v)", tt.in, tt.in)
+		}
+	}
+}
+
+func TestToString(t *testing.T) {
+	s, ok := msgpack.ToString(msgpack.NewString("a"))
+	require.True(t, ok)
+	require.Equal(t, "a", s)
+
+	s, ok = msgpack.ToString("b")
+	require.True(t, ok)
+	require.Equal(t, "b", s)
+
+	_, ok = msgpack.ToString(5)
+	require.False(t, ok)
+	_, ok = msgpack.ToString([]byte("c"))
+	require.False(t, ok)
 }
