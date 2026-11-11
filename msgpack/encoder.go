@@ -260,6 +260,10 @@ func Encode(val any, out io.Writer) error {
 		}
 		return nil
 	case reflect.Slice, reflect.Array:
+		if reflectVal.Kind() == reflect.Slice && reflectVal.Type().Elem().Kind() == reflect.Uint8 {
+			// Named byte slices, like `type MyBytes []byte`, are encoded as binary
+			return Encode(reflectVal.Bytes(), out)
+		}
 		l := reflectVal.Len()
 		if err := writeArrayHeader(uint64(l)); err != nil { //nolint:gosec // lengths are never negative
 			return err

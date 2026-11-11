@@ -1461,6 +1461,7 @@ func TestEncodeNestedErrors(t *testing.T) {
 
 type myUint uint
 type myString string
+type myBytes []byte
 
 func TestEncodeAliasAndPointerTypes(t *testing.T) {
 	e, err := msgpack.Marshal(myUint(300))
@@ -1480,6 +1481,17 @@ func TestEncodeAliasAndPointerTypes(t *testing.T) {
 	e, err = msgpack.Marshal(&b)
 	require.NoError(t, err)
 	require.Equal(t, []byte{0xc4, 0x01, 0x01}, e)
+
+	mb := myBytes{0x01, 0x02}
+	e, err = msgpack.Marshal(mb)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0xc4, 0x02, 0x01, 0x02}, e)
+	e, err = msgpack.Marshal(&mb)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0xc4, 0x02, 0x01, 0x02}, e)
+	e, err = msgpack.Marshal(map[string]myBytes{"k": {0x03}})
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x81, 0xa1, 'k', 0xc4, 0x01, 0x03}, e)
 
 	i := 1
 	_, err = msgpack.Marshal(&i)
