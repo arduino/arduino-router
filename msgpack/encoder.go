@@ -40,8 +40,8 @@ func Marshal(val any) ([]byte, error) {
 //   - any other slice or array, encoded as array;
 //   - any map, encoded as map. The keys of Go maps are written in the
 //     (random) map iteration order; use a [Map] to control the order;
-//   - named types based on string or uint, and pointers to string or []byte
-//     types.
+//   - named types based on string or on any integer type, and pointers to
+//     string or []byte types.
 //
 // The elements of slices, arrays and maps are encoded recursively and must be
 // of a supported type. A [RawMessage] is written verbatim. Structs are not
@@ -300,8 +300,12 @@ func Encode(val any, out io.Writer) error {
 			}
 		}
 		return nil
-	case reflect.Uint:
-		return Encode(uint64(reflectVal.Uint()), out)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		// Named integer types, like `type MyInt int`
+		return Encode(reflectVal.Int(), out)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		// Named unsigned integer types, like `type MyUint uint8`
+		return Encode(reflectVal.Uint(), out)
 	}
 
 	// Unwrap type that are alias of base types like `type MyString string`

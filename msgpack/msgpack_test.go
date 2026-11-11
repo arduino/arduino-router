@@ -1462,6 +1462,11 @@ func TestEncodeNestedErrors(t *testing.T) {
 type myUint uint
 type myString string
 type myBytes []byte
+type myInt int
+type myInt8 int8
+type myInt64 int64
+type myUint8 uint8
+type myUint64 uint64
 
 func TestEncodeAliasAndPointerTypes(t *testing.T) {
 	e, err := msgpack.Marshal(myUint(300))
@@ -1496,6 +1501,27 @@ func TestEncodeAliasAndPointerTypes(t *testing.T) {
 	i := 1
 	_, err = msgpack.Marshal(&i)
 	require.Error(t, err)
+}
+
+func TestEncodeNamedIntegerTypes(t *testing.T) {
+	tests := []struct {
+		val      any
+		expected []byte
+	}{
+		{myInt(42), []byte{0x2a}},
+		{myInt(-1), []byte{0xff}},
+		{myInt8(-100), []byte{0xd0, 0x9c}},
+		{myInt64(math.MinInt64), []byte{0xd3, 0x80, 0, 0, 0, 0, 0, 0, 0}},
+		{myUint8(42), []byte{0x2a}},
+		{myUint64(math.MaxUint64), []byte{0xcf, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}},
+		{[]myInt{1, -1}, []byte{0x92, 0x01, 0xff}},
+		{map[myInt8]myUint8{1: 2}, []byte{0x81, 0x01, 0x02}},
+	}
+	for _, tt := range tests {
+		e, err := msgpack.Marshal(tt.val)
+		require.NoError(t, err, "for value %v (%T)", tt.val, tt.val)
+		require.Equal(t, tt.expected, e, "for value %v (%T)", tt.val, tt.val)
+	}
 }
 
 func TestDecodeSingle(t *testing.T) {

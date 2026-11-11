@@ -34,7 +34,7 @@
 // slice. Both accept the Value types above as well as native Go values (bool,
 // all integer and float types, string, []byte, []any, map[any]any, slices,
 // arrays and maps of any element type, and named types based on string, []byte
-// or uint). Integers are written with the smallest signed format that can hold
+// or any integer type). Integers are written with the smallest signed format that can hold
 // them (fixint, int 8/16/32/64); the uint 64 format is used only for values
 // above math.MaxInt64.
 //
