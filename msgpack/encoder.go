@@ -32,8 +32,9 @@ func Marshal(val any) ([]byte, error) {
 //   - nil, encoded as nil;
 //   - bool;
 //   - int, int8, int16, int32, int64, uint, uint8, uint16, uint32 and uint64,
-//     encoded with the smallest signed integer format that can hold the value,
-//     or as uint 64 for values greater than math.MaxInt64;
+//     encoded with the smallest format that can hold the value: positive
+//     fixint or uint 8/16/32/64 for non-negative values, negative fixint or
+//     int 8/16/32/64 for negative values;
 //   - float32 and float64, encoded as float 32 and float 64 respectively;
 //   - string, encoded as str;
 //   - []byte, and any named type based on []byte, encoded as bin;
@@ -64,45 +65,42 @@ func Encode(val any, out io.Writer) error {
 		}
 		return write8(0xc2) // C2 false
 	}
-	writeInt64 := func(v int64) error {
-		if v >= -32 && v <= 127 {
-			// 00..7F positive fixint
-			// E0..FF negative fixint
-			return write8(byte(v))
-		}
-		if v >= math.MinInt8 && v <= math.MaxInt8 {
-			return write([]byte{0xd0, byte(v)}) // D0 int 8
-		}
-		if v >= math.MinInt16 && v <= math.MaxInt16 {
-			buf := []byte{0xd1, 0, 0} // D1 int 16
-			for i := range 2 {
-				buf[2-i] = byte(v >> (i * 8))
-			}
-			return write(buf)
-		}
-		if v >= math.MinInt32 && v <= math.MaxInt32 {
-			buf := []byte{0xd2, 0, 0, 0, 0} // D2 int 32
-			for i := range 4 {
-				buf[4-i] = byte(v >> (i * 8))
-			}
-			return write(buf)
-		}
-		buf := []byte{0xd3, 0, 0, 0, 0, 0, 0, 0, 0} // D3 int 64
-		for i := range 8 {
-			buf[8-i] = byte(v >> (i * 8))
-		}
-		return write(buf)
-	}
 	writeUint64 := func(v uint64) error {
-		if v <= math.MaxInt64 {
-			return writeInt64(int64(v))
+		switch {
+		case v <= 127:
+			return write8(byte(v)) // 00..7F positive fixint
+		case v <= math.MaxUint8:
+			return write([]byte{0xcc, byte(v)}) // CC uint 8
+		case v <= math.MaxUint16:
+			return write(binary.BigEndian.AppendUint16([]byte{0xcd}, uint16(v))) // CD uint 16
+		case v <= math.MaxUint32:
+			return write(binary.BigEndian.AppendUint32([]byte{0xce}, uint32(v))) // CE uint 32
+		default:
+			return write(binary.BigEndian.AppendUint64([]byte{0xcf}, v)) // CF uint 64
 		}
-		// Write 64-bit unsigned integer
-		buf := []byte{0xcf, 0, 0, 0, 0, 0, 0, 0, 0} // CF uint 64
-		for i := range 8 {
-			buf[8-i] = byte(v >> (i * 8))
+	}
+	writeInt64 := func(v int64) error {
+		if v >= 0 {
+			// Non-negative integers are encoded with the unsigned formats, as
+			// most implementations do: decoders into signed types accept them,
+			// while some decoders into unsigned types reject the signed formats.
+			return writeUint64(uint64(v))
 		}
-		return write(buf)
+		// The signed formats store the two's complement representation of v,
+		// truncated to the size of the format.
+		u := uint64(v) //nolint:gosec // intentional two's complement reinterpretation
+		switch {
+		case v >= -32:
+			return write8(byte(u & 0xff)) // E0..FF negative fixint
+		case v >= math.MinInt8:
+			return write([]byte{0xd0, byte(u & 0xff)}) // D0 int 8
+		case v >= math.MinInt16:
+			return write(binary.BigEndian.AppendUint16([]byte{0xd1}, uint16(u&0xffff))) // D1 int 16
+		case v >= math.MinInt32:
+			return write(binary.BigEndian.AppendUint32([]byte{0xd2}, uint32(u&0xffffffff))) // D2 int 32
+		default:
+			return write(binary.BigEndian.AppendUint64([]byte{0xd3}, u)) // D3 int 64
+		}
 	}
 	writeStringHeader := func(l uint64) error {
 		switch {
@@ -183,11 +181,11 @@ func Encode(val any, out io.Writer) error {
 	case int64:
 		return writeInt64(v)
 	case uint8:
-		return writeInt64(int64(v))
+		return writeUint64(uint64(v))
 	case uint16:
-		return writeInt64(int64(v))
+		return writeUint64(uint64(v))
 	case uint32:
-		return writeInt64(int64(v))
+		return writeUint64(uint64(v))
 	case Float32:
 		return write(binary.BigEndian.AppendUint32([]byte{0xca}, math.Float32bits(float32(v)))) // CA float 32
 	case float32:
