@@ -8,6 +8,7 @@ package msgpack
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -55,14 +56,14 @@ func Decode(in io.Reader) (Value, error) {
 		}
 		return binary.BigEndian.Uint64(buf[:]), nil
 	}
-	readN := func(n int) ([]byte, error) {
+	readN := func(n uint64) ([]byte, error) {
 		buf := make([]byte, n)
 		if _, err := io.ReadFull(in, buf); err != nil {
 			return nil, err
 		}
 		return buf, nil
 	}
-	readArray := func(l int) (Array, error) {
+	readArray := func(l uint64) (Array, error) {
 		a := make(Array, l)
 		for i := range l {
 			if v, err := Decode(in); err != nil {
@@ -73,7 +74,7 @@ func Decode(in io.Reader) (Value, error) {
 		}
 		return a, nil
 	}
-	readMap := func(l int) (Map, error) {
+	readMap := func(l uint64) (Map, error) {
 		m := NewMap()
 		for range l {
 			if k, err := Decode(in); err != nil {
@@ -97,13 +98,13 @@ func Decode(in io.Reader) (Value, error) {
 		return Integer{i64: int64(k)}, nil
 	// 80..8F fixmap
 	case k >= 0x80 && k <= 0x8f:
-		return readMap(int(k & 0x0f))
+		return readMap(k & 0x0f)
 	// 90..9F fixarray
 	case k >= 0x90 && k <= 0x9f:
-		return readArray(int(k & 0x0f))
+		return readArray(k & 0x0f)
 	// A0..BF fixstr
 	case k >= 0xa0 && k <= 0xbf:
-		if buf, err := readN(int(k & 0x1f)); err != nil {
+		if buf, err := readN(k & 0x1f); err != nil {
 			return nil, err
 		} else {
 			return String(buf), nil
@@ -124,7 +125,7 @@ func Decode(in io.Reader) (Value, error) {
 	case k == 0xc4:
 		if len8, err := read8(); err != nil {
 			return nil, err
-		} else if buf, err := readN(int(len8)); err != nil {
+		} else if buf, err := readN(len8); err != nil {
 			return nil, err
 		} else {
 			return Binary(buf), nil
@@ -133,7 +134,7 @@ func Decode(in io.Reader) (Value, error) {
 	case k == 0xc5:
 		if len16, err := read16(); err != nil {
 			return nil, err
-		} else if buf, err := readN(int(len16)); err != nil {
+		} else if buf, err := readN(len16); err != nil {
 			return nil, err
 		} else {
 			return Binary(buf), nil
@@ -142,7 +143,7 @@ func Decode(in io.Reader) (Value, error) {
 	case k == 0xc6:
 		if l, err := read32(); err != nil {
 			return nil, err
-		} else if buf, err := readN(int(l)); err != nil {
+		} else if buf, err := readN(l); err != nil {
 			return nil, err
 		} else {
 			return Binary(buf), nil
@@ -153,7 +154,7 @@ func Decode(in io.Reader) (Value, error) {
 			return nil, err
 		} else if t, err := read8(); err != nil {
 			return nil, err
-		} else if data, err := readN(int(l)); err != nil {
+		} else if data, err := readN(l); err != nil {
 			return nil, err
 		} else {
 			return Extension{Type: int8(t), Data: data}, nil //nolint:gosec // ext type is a signed byte
@@ -164,7 +165,7 @@ func Decode(in io.Reader) (Value, error) {
 			return nil, err
 		} else if t, err := read8(); err != nil {
 			return nil, err
-		} else if data, err := readN(int(l)); err != nil {
+		} else if data, err := readN(l); err != nil {
 			return nil, err
 		} else {
 			return Extension{Type: int8(t), Data: data}, nil //nolint:gosec // ext type is a signed byte
@@ -175,7 +176,7 @@ func Decode(in io.Reader) (Value, error) {
 			return nil, err
 		} else if t, err := read8(); err != nil {
 			return nil, err
-		} else if data, err := readN(int(l)); err != nil {
+		} else if data, err := readN(l); err != nil {
 			return nil, err
 		} else {
 			return Extension{Type: int8(t), Data: data}, nil //nolint:gosec // ext type is a signed byte
@@ -252,7 +253,7 @@ func Decode(in io.Reader) (Value, error) {
 		}
 	// D4...D8 fixext 1/2/4/8/16
 	case k >= 0xd4 && k <= 0xd8:
-		l := 1 << (k - 0xd4)
+		l := uint64(1) << (k - 0xd4)
 		if t, err := read8(); err != nil {
 			return nil, err
 		} else if data, err := readN(l); err != nil {
@@ -264,7 +265,7 @@ func Decode(in io.Reader) (Value, error) {
 	case k == 0xd9:
 		if len8, err := read8(); err != nil {
 			return nil, err
-		} else if buf, err := readN(int(len8)); err != nil {
+		} else if buf, err := readN(len8); err != nil {
 			return nil, err
 		} else {
 			return String(buf), nil
@@ -273,7 +274,7 @@ func Decode(in io.Reader) (Value, error) {
 	case k == 0xda:
 		if len16, err := read16(); err != nil {
 			return nil, err
-		} else if buf, err := readN(int(len16)); err != nil {
+		} else if buf, err := readN(len16); err != nil {
 			return nil, err
 		} else {
 			return String(buf), nil
@@ -282,7 +283,7 @@ func Decode(in io.Reader) (Value, error) {
 	case k == 0xdb:
 		if l, err := read32(); err != nil {
 			return nil, err
-		} else if buf, err := readN(int(l)); err != nil {
+		} else if buf, err := readN(l); err != nil {
 			return nil, err
 		} else {
 			return String(buf), nil
@@ -292,28 +293,28 @@ func Decode(in io.Reader) (Value, error) {
 		if length, err := read16(); err != nil {
 			return nil, err
 		} else {
-			return readArray(int(length))
+			return readArray(length)
 		}
 	// DD array 32
 	case k == 0xdd:
 		if length, err := read32(); err != nil {
 			return nil, err
 		} else {
-			return readArray(int(length))
+			return readArray(length)
 		}
 	// DE map 16
 	case k == 0xde:
 		if length, err := read16(); err != nil {
 			return nil, err
 		} else {
-			return readMap(int(length))
+			return readMap(length)
 		}
 	// DF map 32
 	case k == 0xdf:
 		if length, err := read32(); err != nil {
 			return nil, err
 		} else {
-			return readMap(int(length))
+			return readMap(length)
 		}
 	// E0..FF negative fixint
 	case k >= 0xe0:
@@ -447,6 +448,9 @@ func DecodeSingle(in io.Reader) (readBytes []byte, kind ValueKind, elementsFollo
 	case k == 0xc9:
 		if l, err := read32(); err != nil {
 			return nil, 0, 0, nil, err
+		} else if uint(l)+1 == 0 {
+			// Only possible on 32-bit platforms, where uint can't hold the length plus the type byte
+			return nil, 0, 0, nil, errors.New("msgpack: extension too large")
 		} else {
 			return nil, ValueKindExtension, uint(l + 1), nil, nil
 		}
@@ -625,19 +629,19 @@ func decodeInto(in io.Reader, out io.Writer) error {
 		_, _ = out.Write(buf[:])
 		return uint64(binary.BigEndian.Uint32(buf[:])), nil
 	}
-	skipBytes := func(n int) error {
+	skipBytes := func(n uint64) error {
 		var buf [1024]byte
 		for n > 0 {
-			if r, err := io.ReadFull(in, buf[:min(len(buf), n)]); err != nil {
+			chunk := buf[:min(uint64(len(buf)), n)]
+			if _, err := io.ReadFull(in, chunk); err != nil {
 				return err
-			} else {
-				_, _ = out.Write(buf[:r])
-				n -= r
 			}
+			_, _ = out.Write(chunk)
+			n -= uint64(len(chunk))
 		}
 		return nil
 	}
-	skip := func(n int) error {
+	skip := func(n uint64) error {
 		for range n {
 			if err := decodeInto(in, out); err != nil {
 				return err
@@ -656,13 +660,13 @@ func decodeInto(in io.Reader, out io.Writer) error {
 		return nil
 	// 80..8F fixmap
 	case k >= 0x80 && k <= 0x8f:
-		return skip(int(k&0x0f) * 2)
+		return skip((k & 0x0f) * 2)
 	// 90..9F fixarray
 	case k >= 0x90 && k <= 0x9f:
-		return skip(int(k & 0x0f))
+		return skip(k & 0x0f)
 	// A0..BF fixstr
 	case k >= 0xa0 && k <= 0xbf:
-		return skipBytes(int(k & 0x1f))
+		return skipBytes(k & 0x1f)
 	// C0 nil
 	case k == 0xc0:
 		return nil
@@ -680,42 +684,42 @@ func decodeInto(in io.Reader, out io.Writer) error {
 		if len8, err := read8(); err != nil {
 			return err
 		} else {
-			return skipBytes(int(len8))
+			return skipBytes(len8)
 		}
 	// C5 bin 16
 	case k == 0xc5:
 		if len16, err := read16(); err != nil {
 			return err
 		} else {
-			return skipBytes(int(len16))
+			return skipBytes(len16)
 		}
 	// C6 bin 32
 	case k == 0xc6:
 		if l, err := read32(); err != nil {
 			return err
 		} else {
-			return skipBytes(int(l))
+			return skipBytes(l)
 		}
 	// C7 ext 8
 	case k == 0xc7:
 		if l, err := read8(); err != nil {
 			return err
 		} else {
-			return skipBytes(int(l + 1))
+			return skipBytes(l + 1)
 		}
 	// C8 ext 16
 	case k == 0xc8:
 		if l, err := read16(); err != nil {
 			return err
 		} else {
-			return skipBytes(int(l) + 1)
+			return skipBytes(l + 1)
 		}
 	// C9 ext 32
 	case k == 0xc9:
 		if l, err := read32(); err != nil {
 			return err
 		} else {
-			return skipBytes(int(l) + 1)
+			return skipBytes(l + 1)
 		}
 	// CA float 32
 	case k == 0xca:
@@ -749,56 +753,56 @@ func decodeInto(in io.Reader, out io.Writer) error {
 		return skipBytes(8)
 	// D4...D8 fixext 1/2/4/8/16
 	case k >= 0xd4 && k <= 0xd8:
-		l := 1 << (k - 0xd4)
-		return skipBytes(int(l) + 1)
+		l := uint64(1) << (k - 0xd4)
+		return skipBytes(l + 1)
 	// D9 str 8
 	case k == 0xd9:
 		if l, err := read8(); err != nil {
 			return err
 		} else {
-			return skipBytes(int(l))
+			return skipBytes(l)
 		}
 	// DA str 16
 	case k == 0xda:
 		if l, err := read16(); err != nil {
 			return err
 		} else {
-			return skipBytes(int(l))
+			return skipBytes(l)
 		}
 	// DB str 32
 	case k == 0xdb:
 		if l, err := read32(); err != nil {
 			return err
 		} else {
-			return skipBytes(int(l))
+			return skipBytes(l)
 		}
 	// DC array 16
 	case k == 0xdc:
 		if l, err := read16(); err != nil {
 			return err
 		} else {
-			return skip(int(l))
+			return skip(l)
 		}
 	// DD array 32
 	case k == 0xdd:
 		if l, err := read32(); err != nil {
 			return err
 		} else {
-			return skip(int(l))
+			return skip(l)
 		}
 	// DE map 16
 	case k == 0xde:
 		if l, err := read16(); err != nil {
 			return err
 		} else {
-			return skip(int(l) * 2)
+			return skip(l * 2)
 		}
 	// DF map 32
 	case k == 0xdf:
 		if l, err := read32(); err != nil {
 			return err
 		} else {
-			return skip(int(l) * 2)
+			return skip(l * 2)
 		}
 	// E0..FF negative fixint
 	case k >= 0xe0:
