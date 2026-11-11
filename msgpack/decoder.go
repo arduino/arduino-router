@@ -20,6 +20,12 @@ func signExtend(v uint64, n uint) int64 {
 	return int64(v<<shift) >> shift //nolint:gosec // intentional two's complement reinterpretation
 }
 
+// Decode reads a single, complete MessagePack value from in and returns it as
+// a [Value].
+//
+// Decode reads exactly the bytes that make up the value, so it can be called
+// repeatedly to read a stream of consecutive values. If in is already at its
+// end, Decode returns [io.EOF]; read errors are returned as they are.
 func Decode(in io.Reader) (Value, error) {
 	read8 := func() (uint64, error) {
 		var buf [1]byte
@@ -316,13 +322,23 @@ func Decode(in io.Reader) (Value, error) {
 	return nil, fmt.Errorf("unsupported msgpack type 0x%02x", k)
 }
 
-// DecodeSingle decodes a MessagePack token from the given reader.
+// DecodeSingle reads a single MessagePack token from in: a complete scalar
+// value, or the header of a string, binary, extension, array or map. It never
+// reads more than 9 bytes and never reads the payload or the elements that
+// follow a header, so it can be used to walk a stream element by element.
+//
 // It returns:
-// - the raw bytes of the token,
-// - the value kind,
-// - the number of elements following (for arrays and maps) or the length of the element (for strings and binary data),
-// - the decoded value (if the literal is complete),
-// - an error if any occurred.
+//
+//   - readBytes: the bytes consumed from in (the encoded token);
+//   - kind: the kind of the value;
+//   - elementsFollowing: for arrays, the number of elements that follow; for
+//     maps, the number of key-value pairs that follow (each pair is two
+//     values); for strings and binary data, the length in bytes of the
+//     payload that follows; for extensions, the length of the payload plus
+//     one (the type byte, which also still has to be read); 0 for scalars;
+//   - decodedValue: the decoded value for scalars (nil, bool, integers and
+//     floats), or nil for the other kinds;
+//   - err: any error that occurred.
 func DecodeSingle(in io.Reader) (readBytes []byte, kind ValueKind, elementsFollowing uint, decodedValue Value, err error) {
 	buff := make([]byte, 9)
 	buffRead := 0
@@ -564,6 +580,10 @@ func DecodeSingle(in io.Reader) (readBytes []byte, kind ValueKind, elementsFollo
 	return nil, 0, 0, nil, fmt.Errorf("unsupported msgpack type 0x%02x", k)
 }
 
+// DecodeRaw reads a single, complete MessagePack value from in and returns
+// its encoding as a [RawMessage], without building the corresponding [Value].
+// The structure is validated only as far as needed to find the end of the
+// value.
 func DecodeRaw(in io.Reader) (RawMessage, error) {
 	rawBuff := bytes.NewBuffer(nil)
 	err := decodeInto(in, rawBuff)
@@ -573,6 +593,9 @@ func DecodeRaw(in io.Reader) (RawMessage, error) {
 	return RawMessage{data: rawBuff.Bytes()}, nil
 }
 
+// Skip reads and discards a single, complete MessagePack value from in,
+// including all the elements of arrays and maps.
+// It uses a small, fixed amount of memory regardless of the size of the value.
 func Skip(in io.Reader) error {
 	return decodeInto(in, io.Discard)
 }
@@ -786,6 +809,23 @@ func decodeInto(in io.Reader, out io.Writer) error {
 
 // Unmarshalling functions
 
+// Unmarshal reads a single MessagePack value from in, as [Decode] does, and
+// converts it to native Go types:
+//
+//	Nil          nil
+//	Bool         bool
+//	Integer      int, or uint if the value does not fit in an int
+//	Float32      float32
+//	Float64      float64
+//	String       string
+//	Binary       []byte
+//	Array        []any
+//	Map          map[any]any
+//	Extension    Extension (unchanged)
+//
+// A map with an array, map or extension as key cannot be represented as a
+// map[any]any, so it is returned unchanged as a [Map] (its values are not
+// converted either).
 func Unmarshal(in io.Reader) (any, error) {
 	v, err := Decode(in)
 	if err != nil {
@@ -838,6 +878,9 @@ func unmarshal(v Value) any {
 	}
 }
 
+// ToInt converts v to an int. v can be an [Integer] or any Go integer type,
+// as returned by [Decode] or [Unmarshal]. The boolean result is false if v is
+// not an integer or if its value does not fit in an int.
 func ToInt(v any) (int, bool) {
 	switch v := v.(type) {
 	case Integer:
@@ -866,6 +909,9 @@ func ToInt(v any) (int, bool) {
 	return 0, false
 }
 
+// ToUint converts v to a uint. v can be an [Integer] or any Go integer type,
+// as returned by [Decode] or [Unmarshal]. The boolean result is false if v is
+// not an integer, is negative, or does not fit in a uint.
 func ToUint(v any) (uint, bool) {
 	switch v := v.(type) {
 	case Integer:
@@ -909,6 +955,9 @@ func ToUint(v any) (uint, bool) {
 	return 0, false
 }
 
+// ToString converts v to a string. v can be a [String] or a Go string, as
+// returned by [Decode] or [Unmarshal]. The boolean result is false if v is
+// not a string; [Binary] and []byte values are not converted.
 func ToString(v any) (string, bool) {
 	switch v := v.(type) {
 	case String:

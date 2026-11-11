@@ -15,6 +15,8 @@ import (
 	"reflect"
 )
 
+// Marshal returns the MessagePack encoding of val. See [Encode] for the
+// supported types.
 func Marshal(val any) ([]byte, error) {
 	writer := bytes.NewBuffer(nil)
 	if err := Encode(val, writer); err != nil {
@@ -23,6 +25,30 @@ func Marshal(val any) ([]byte, error) {
 	return writer.Bytes(), nil
 }
 
+// Encode writes the MessagePack encoding of val to out.
+//
+// val can be any [Value] or one of the following Go types:
+//
+//   - nil, encoded as nil;
+//   - bool;
+//   - int, int8, int16, int32, int64, uint, uint8, uint16, uint32 and uint64,
+//     encoded with the smallest signed integer format that can hold the value,
+//     or as uint 64 for values greater than math.MaxInt64;
+//   - float32 and float64, encoded as float 32 and float 64 respectively;
+//   - string, encoded as str;
+//   - []byte, and any named type based on []byte, encoded as bin;
+//   - any other slice or array, encoded as array;
+//   - any map, encoded as map. The keys of Go maps are written in the
+//     (random) map iteration order; use a [Map] to control the order;
+//   - named types based on string or uint, and pointers to string or []byte
+//     types.
+//
+// The elements of slices, arrays and maps are encoded recursively and must be
+// of a supported type. A [RawMessage] is written verbatim. Structs are not
+// supported.
+//
+// If an unsupported type is found, Encode returns an error; part of the
+// encoding may already have been written to out at that point.
 func Encode(val any, out io.Writer) error {
 	write8 := func(b byte) error {
 		_, err := out.Write([]byte{b})
