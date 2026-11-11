@@ -139,7 +139,7 @@ func (i Integer) Int() (int, bool) {
 	if i.u64 != 0 {
 		return int(i.u64), i.u64 <= math.MaxInt //nolint:gosec // truncation is documented
 	}
-	return int(i.i64), true
+	return int(i.i64), i.i64 >= math.MinInt && i.i64 <= math.MaxInt
 }
 
 // Uint returns the integer as a uint. The boolean result is false if the
@@ -149,7 +149,7 @@ func (i Integer) Uint() (uint, bool) {
 	if i.u64 != 0 {
 		return uint(i.u64), i.u64 <= math.MaxUint
 	}
-	return uint(i.i64), i.i64 >= 0 && i.i64 <= math.MaxInt //nolint:gosec // truncation is documented
+	return uint(i.i64), i.i64 >= 0 && uint64(i.i64) <= math.MaxUint //nolint:gosec // truncation is documented
 }
 
 // Int64 returns the integer as an int64. The boolean result is false if the

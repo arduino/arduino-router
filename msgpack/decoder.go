@@ -814,7 +814,9 @@ func decodeInto(in io.Reader, out io.Writer) error {
 //
 //	Nil          nil
 //	Bool         bool
-//	Integer      int, or uint if the value does not fit in an int
+//	Integer      int, or uint if the value does not fit in an int, or
+//	             int64/uint64 if it does not fit in either (only possible
+//	             on 32-bit platforms)
 //	Float32      float32
 //	Float64      float64
 //	String       string
@@ -840,7 +842,14 @@ func unmarshal(v Value) any {
 		if val, ok := v.Int(); ok {
 			return val
 		}
-		val, _ := v.Uint()
+		if val, ok := v.Uint(); ok {
+			return val
+		}
+		// On 32-bit platforms the value may fit neither in an int nor in an uint
+		if val, ok := v.Int64(); ok {
+			return val
+		}
+		val, _ := v.Uint64()
 		return val
 	case String:
 		return string(v)
@@ -894,7 +903,7 @@ func ToInt(v any) (int, bool) {
 	case int32:
 		return int(v), true
 	case int64:
-		return int(v), true
+		return int(v), v >= math.MinInt && v <= math.MaxInt
 	case uint:
 		return int(v), v <= math.MaxInt
 	case uint8:
@@ -904,7 +913,10 @@ func ToInt(v any) (int, bool) {
 	case uint32:
 		return int(v), uint(v) <= math.MaxInt
 	case uint64:
-		return int(v), v <= math.MaxInt
+		if v > math.MaxInt {
+			return 0, false
+		}
+		return int(v), true
 	}
 	return 0, false
 }
@@ -925,7 +937,7 @@ func ToUint(v any) (uint, bool) {
 	case uint32:
 		return uint(v), true
 	case uint64:
-		return uint(v), true
+		return uint(v), v <= math.MaxUint
 	case int:
 		if v < 0 {
 			return 0, false
@@ -947,7 +959,7 @@ func ToUint(v any) (uint, bool) {
 		}
 		return uint(v), true
 	case int64:
-		if v < 0 {
+		if v < 0 || uint64(v) > math.MaxUint {
 			return 0, false
 		}
 		return uint(v), true

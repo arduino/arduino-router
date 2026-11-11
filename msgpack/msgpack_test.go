@@ -172,8 +172,11 @@ func TestUnsignedIntegers(t *testing.T) {
 			iv := v.(msgpack.Integer)
 			require.True(t, iv.IsSigned())
 			vi, ok := iv.Int()
-			require.Equal(t, int(test.expected), vi)
-			require.True(t, ok)
+			fitsInt := test.expected <= math.MaxInt
+			require.Equal(t, fitsInt, ok)
+			if fitsInt {
+				require.Equal(t, int(test.expected), vi)
+			}
 			ui, ok := iv.Uint64()
 			require.Equal(t, test.expected, ui)
 			require.True(t, ok)
@@ -268,8 +271,11 @@ func TestSignedIntegers(t *testing.T) {
 				require.True(t, ok)
 			}
 			iint, ok := iv.Int()
-			require.Equal(t, int(test.expected), iint)
-			require.True(t, ok)
+			fitsInt := test.expected >= math.MinInt && test.expected <= math.MaxInt
+			require.Equal(t, fitsInt, ok)
+			if fitsInt {
+				require.Equal(t, int(test.expected), iint)
+			}
 			require.Equal(t, test.str, v.String())
 
 			e, err := msgpack.Marshal(v)
@@ -1738,7 +1744,13 @@ func TestUnmarshal(t *testing.T) {
 
 	require.Equal(t, 5, unmarshal(t, []byte{0x05}))
 	require.Equal(t, -1, unmarshal(t, []byte{0xff}))
-	require.Equal(t, uint(math.MaxUint64), unmarshal(t, []byte{0xcf, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}))
+	if math.MaxUint == math.MaxUint64 {
+		require.Equal(t, uint(math.MaxUint), unmarshal(t, []byte{0xcf, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}))
+		require.Equal(t, math.MinInt, unmarshal(t, []byte{0xd3, 0x80, 0, 0, 0, 0, 0, 0, 0}))
+	} else {
+		require.Equal(t, uint64(math.MaxUint64), unmarshal(t, []byte{0xcf, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff}))
+		require.Equal(t, int64(math.MinInt64), unmarshal(t, []byte{0xd3, 0x80, 0, 0, 0, 0, 0, 0, 0}))
+	}
 	require.Equal(t, "hi", unmarshal(t, []byte{0xa2, 'h', 'i'}))
 	require.Equal(t, true, unmarshal(t, []byte{0xc3}))
 	require.Equal(t, false, unmarshal(t, []byte{0xc2}))
@@ -1783,9 +1795,12 @@ func TestIntegerUint(t *testing.T) {
 	_, ok = msgpack.NewInteger(-1).Uint()
 	require.False(t, ok)
 
-	v, ok = msgpack.NewInteger(uint64(math.MaxUint64)).Uint()
+	v, ok = msgpack.NewInteger(uint64(math.MaxUint)).Uint()
 	require.True(t, ok)
-	require.Equal(t, uint(math.MaxUint64), v)
+	require.Equal(t, uint(math.MaxUint), v)
+
+	_, ok = msgpack.NewInteger(uint64(math.MaxUint64)).Uint()
+	require.Equal(t, math.MaxUint == math.MaxUint64, ok)
 }
 
 func TestToInt(t *testing.T) {
@@ -1805,7 +1820,7 @@ func TestToInt(t *testing.T) {
 		{uint(math.MaxUint), -1, false},
 		{uint8(7), 7, true},
 		{uint16(8), 8, true},
-		{uint32(math.MaxUint32), math.MaxUint32, true},
+		{uint32(math.MaxInt32), math.MaxInt32, true},
 		{uint64(10), 10, true},
 		{uint64(math.MaxUint64), -1, false},
 		{"5", 0, false},
@@ -1833,7 +1848,7 @@ func TestToUint(t *testing.T) {
 		{uint8(2), 2, true},
 		{uint16(3), 3, true},
 		{uint32(4), 4, true},
-		{uint64(math.MaxUint64), math.MaxUint64, true},
+		{uint64(math.MaxUint), math.MaxUint, true},
 		{int(6), 6, true},
 		{int(-6), 0, false},
 		{int8(7), 7, true},
@@ -1854,6 +1869,34 @@ func TestToUint(t *testing.T) {
 			require.Equal(t, tt.out, out, "%T(%v)", tt.in, tt.in)
 		}
 	}
+}
+
+func TestIntegerConversionsOutOfIntRange(t *testing.T) {
+	// These values fit in an int (or uint) only on 64-bit platforms, so the
+	// conversions must fail on 32-bit platforms instead of truncating.
+	is64bit := math.MaxInt > math.MaxInt32
+
+	_, ok := msgpack.NewInteger(int64(math.MaxInt32) + 1).Int()
+	require.Equal(t, is64bit, ok)
+	_, ok = msgpack.NewInteger(int64(math.MinInt32) - 1).Int()
+	require.Equal(t, is64bit, ok)
+	_, ok = msgpack.ToInt(int64(math.MaxInt32) + 1)
+	require.Equal(t, is64bit, ok)
+	_, ok = msgpack.ToInt(int64(math.MinInt32) - 1)
+	require.Equal(t, is64bit, ok)
+	u32 := uint32(math.MaxUint32)
+	out, ok := msgpack.ToInt(u32)
+	require.Equal(t, is64bit, ok)
+	if ok {
+		require.Equal(t, int(u32), out)
+	}
+
+	_, ok = msgpack.NewInteger(int64(math.MaxUint32) + 1).Uint()
+	require.Equal(t, is64bit, ok)
+	_, ok = msgpack.ToUint(int64(math.MaxUint32) + 1)
+	require.Equal(t, is64bit, ok)
+	_, ok = msgpack.ToUint(uint64(math.MaxUint32) + 1)
+	require.Equal(t, is64bit, ok)
 }
 
 func TestToString(t *testing.T) {
