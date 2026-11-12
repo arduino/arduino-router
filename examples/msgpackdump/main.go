@@ -9,9 +9,10 @@ import (
 	"log"
 	"os"
 
+	"github.com/arduino/arduino-router/msgpack"
+
 	"github.com/arduino/go-paths-helper"
 	"github.com/davecgh/go-spew/spew"
-	"github.com/vmihailenco/msgpack/v5"
 )
 
 func main() {
@@ -19,9 +20,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	d := msgpack.NewDecoder(f)
 	for {
-		if v, err := d.DecodeInterface(); err != nil {
+		if v, err := msgpack.Unmarshal(f); err != nil {
 			log.Fatal(err)
 		} else {
 			spew.Dump(v)

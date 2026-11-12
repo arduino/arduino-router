@@ -19,6 +19,7 @@ import (
 	"golang.org/x/sys/unix"
 
 	"github.com/arduino/arduino-router/internal/msgpackrouter"
+	"github.com/arduino/arduino-router/msgpack"
 	"github.com/arduino/arduino-router/msgpackrpc"
 )
 
@@ -163,7 +164,7 @@ func hciRecv(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterR
 		return
 	}
 
-	size, ok := msgpackrpc.ToUint(params[0])
+	size, ok := msgpack.ToUint(params[0])
 	if !ok {
 		res(nil, []any{1, "Invalid parameter type, expected uint for max bytes"})
 		return

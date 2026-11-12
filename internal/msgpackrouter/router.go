@@ -14,8 +14,7 @@ import (
 	"maps"
 	"sync"
 
-	"github.com/vmihailenco/msgpack/v5"
-
+	"github.com/arduino/arduino-router/msgpack"
 	"github.com/arduino/arduino-router/msgpackrpc"
 )
 
@@ -79,7 +78,7 @@ func (r *rawParams) Get() []any {
 	r.decoded = make([]any, len(r.raw))
 	for i, p := range r.raw {
 		if raw, ok := p.(msgpack.RawMessage); ok {
-			_ = msgpack.Unmarshal(raw, &r.decoded[i])
+			r.decoded[i] = raw.Unmarshal()
 		} else {
 			r.decoded[i] = p
 		}
@@ -157,7 +156,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 				// Fix the buffer size for the connection, if a bigger message is received, it will be rejected
 				if len(params.Get()) != 1 {
 					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params.Get()))))
-				} else if maxBuffSize, ok := msgpackrpc.ToInt(params.Get()[0]); !ok {
+				} else if maxBuffSize, ok := msgpack.ToInt(params.Get()[0]); !ok {
 					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: expected int, got %T", params.Get()[0])))
 				} else if maxBuffSize <= 127 {
 					fwdRes(nil, routerError(ErrCodeInvalidParams, "invalid params: max buffer size must be greater than 127"))
@@ -210,7 +209,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 				// Fix the buffer size for the connection, if a bigger message is received, it will be rejected
 				if len(params.Get()) != 1 {
 					slog.Error(fmt.Sprintf("invalid params: only one param is expected, got %d", len(params.Get())))
-				} else if maxBuffSize, ok := msgpackrpc.ToInt(params.Get()[0]); !ok {
+				} else if maxBuffSize, ok := msgpack.ToInt(params.Get()[0]); !ok {
 					slog.Error(fmt.Sprintf("invalid params: expected int, got %T", params.Get()[0]))
 				} else if maxBuffSize <= 127 {
 					slog.Error("invalid params: max buffer size must be greater than 127")

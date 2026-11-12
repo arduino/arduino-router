@@ -12,25 +12,23 @@ import (
 	"io"
 	"testing"
 
+	"github.com/arduino/arduino-router/msgpack"
+
 	"github.com/stretchr/testify/require"
-	"github.com/vmihailenco/msgpack/v5"
 )
 
 func encodeStream(t *testing.T, values ...any) []byte {
 	t.Helper()
 
 	var b bytes.Buffer
-	enc := msgpack.NewEncoder(&b)
-	enc.UseCompactInts(true)
 	for _, v := range values {
-		require.NoError(t, enc.Encode(v))
+		require.NoError(t, msgpack.Encode(v, &b))
 	}
 	return b.Bytes()
 }
 
 func decodePacketFromBytes(c *Connection, data []byte) (rpcPacket, error) {
-	d := msgpack.NewDecoder(bytes.NewReader(data))
-	return c.decodeRpcPacket(d)
+	return c.decodeRpcPacket(bytes.NewReader(data))
 }
 
 func TestDecodeRpcPacketValid(t *testing.T) {
@@ -63,7 +61,7 @@ func TestDecodeRpcPacketValid(t *testing.T) {
 		require.Equal(t, messageTypeResponse, packet.msgType)
 		require.Equal(t, MessageID(3), packet.msgID)
 		require.Nil(t, packet.reqError)
-		require.Equal(t, map[string]any{"ok": true}, packet.reqResult)
+		require.Equal(t, map[any]any{"ok": true}, packet.reqResult)
 	})
 
 	t.Run("request and response raw", func(t *testing.T) {
@@ -73,12 +71,13 @@ func TestDecodeRpcPacketValid(t *testing.T) {
 		requestPacket, err := decodePacketFromBytes(c, encodeStream(t, []any{messageTypeRequest, MessageID(1), "raw", []any{42}}))
 		require.NoError(t, err)
 		require.Len(t, requestPacket.params, 1)
-		require.IsType(t, msgpack.RawMessage{}, requestPacket.params[0])
+		var v msgpack.RawMessage
+		require.IsType(t, v, requestPacket.params[0])
 
 		responsePacket, err := decodePacketFromBytes(c, encodeStream(t, []any{messageTypeResponse, MessageID(9), "e", []any{"r"}}))
 		require.NoError(t, err)
-		require.IsType(t, msgpack.RawMessage{}, responsePacket.reqError)
-		require.IsType(t, msgpack.RawMessage{}, responsePacket.reqResult)
+		require.IsType(t, v, responsePacket.reqError)
+		require.IsType(t, v, responsePacket.reqResult)
 	})
 }
 
@@ -211,7 +210,7 @@ func TestDecodeRpcPacketInvalid(t *testing.T) {
 			var data []byte
 			data = append(data, tc.data...)
 			data = append(data, encodeStream(t, []any{messageTypeNotification, "ok", []any{}})...)
-			d := msgpack.NewDecoder(bytes.NewReader(data))
+			d := bytes.NewReader(data)
 
 			_, err := c.decodeRpcPacket(d)
 			require.Error(t, err)
@@ -243,7 +242,7 @@ func TestDecodeRpcPacketSkipAndContinue(t *testing.T) {
 	)
 
 	c := &Connection{}
-	d := msgpack.NewDecoder(bytes.NewReader(stream))
+	d := bytes.NewReader(stream)
 
 	_, err := c.decodeRpcPacket(d)
 	require.Error(t, err)

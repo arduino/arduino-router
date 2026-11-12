@@ -14,17 +14,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/arduino/arduino-router/msgpack"
+
 	"github.com/djherbis/buffer"
 	"github.com/djherbis/nio/v3"
 	"github.com/stretchr/testify/require"
-	"github.com/vmihailenco/msgpack/v5"
 )
 
 func TestRPCConnection(t *testing.T) {
 	in, testdataIn := nio.Pipe(buffer.New(1024))
 	testdataOut, out := nio.Pipe(buffer.New(1024))
-	d := msgpack.NewDecoder(testdataOut)
-	d.UseLooseInterfaceDecoding(true)
 
 	expNotifications := []string{
 		"NOT method=initialized params=[123]",
@@ -66,10 +65,8 @@ func TestRPCConnection(t *testing.T) {
 	t.Cleanup(conn.Close)
 	go conn.Run()
 
-	enc := msgpack.NewEncoder(testdataIn)
-	enc.UseCompactInts(true)
 	send := func(msg ...any) {
-		require.NoError(t, enc.Encode(msg))
+		require.NoError(t, msgpack.Encode(msg, testdataIn))
 	}
 
 	{ // Test incoming notification
@@ -78,16 +75,16 @@ func TestRPCConnection(t *testing.T) {
 
 	{ // Test incoming request
 		send(messageTypeRequest, MessageID(1), "textDocument/didOpen", []any{})
-		msg, err := d.DecodeSlice()
+		msg, err := msgpack.Unmarshal(testdataOut)
 		require.NoError(t, err)
-		require.Equal(t, []any{int64(1), int64(1), nil, []any{}}, msg)
+		require.Equal(t, []any{1, 1, nil, []any{}}, msg)
 	}
 
 	{ // Test another incoming request
 		send(messageTypeRequest, MessageID(2), "textDocument/didClose", []any{})
-		msg, err := d.DecodeSlice()
+		msg, err := msgpack.Unmarshal(testdataOut)
 		require.NoError(t, err)
-		require.Equal(t, []any{int64(1), int64(2), nil, []any{}}, msg)
+		require.Equal(t, []any{1, 2, nil, []any{}}, msg)
 	}
 
 	{ // Test outgoing request
@@ -96,12 +93,12 @@ func TestRPCConnection(t *testing.T) {
 			respRes, respErr, err := conn.SendRequest(t.Context(), "helloworld", true)
 			require.NoError(t, err)
 			require.Nil(t, respErr)
-			require.Equal(t, map[string]any{"fakedata": int8(99)}, respRes)
+			require.Equal(t, map[any]any{"fakedata": 99}, respRes)
 		})
-		msg, err := d.DecodeSlice() // Grab the SendRequest
+		msg, err := msgpack.Unmarshal(testdataOut) // Grab the SendRequest
 		require.NoError(t, err)
-		require.Equal(t, []any{int64(0), int64(1), "helloworld", []any{true}}, msg)
-		send(messageTypeResponse, 1, nil, map[string]any{"fakedata": 99})
+		require.Equal(t, []any{0, 1, "helloworld", []any{true}}, msg)
+		send(messageTypeResponse, 1, nil, map[any]any{"fakedata": 99})
 		wg.Wait()
 	}
 
@@ -124,14 +121,9 @@ func TestRPCMessageMaxSize(t *testing.T) {
 	in, testdataIn := nio.Pipe(buffer.New(1024))
 	testdataOut, out := nio.Pipe(buffer.New(1024))
 
-	enc := msgpack.NewEncoder(testdataIn)
-	enc.UseCompactInts(true)
 	send := func(msg ...any) {
-		require.NoError(t, enc.Encode(msg))
+		require.NoError(t, msgpack.Encode(msg, testdataIn))
 	}
-
-	d := msgpack.NewDecoder(testdataOut)
-	d.UseLooseInterfaceDecoding(true)
 
 	conn := NewConnection(
 		in, out,
@@ -142,6 +134,7 @@ func TestRPCMessageMaxSize(t *testing.T) {
 		},
 		func(logger FunctionLogger, method string, params []any) {
 			// Should receive only small notifications
+			require.IsType(t, "", params[0])
 			require.Equal(t, "hi", params[0].(string))
 		},
 		func(e error) {
@@ -165,20 +158,20 @@ func TestRPCMessageMaxSize(t *testing.T) {
 
 	// Call a method that returns a response exceeding the limit
 	send(messageTypeRequest, MessageID(1), "test", []any{})
-	var resp any
-	require.NoError(t, d.Decode(&resp))
-	require.Equal(t, []any{int64(1), int64(1), nil, "123"}, resp) // Check that the custom error is returned
+	resp, err := msgpack.Unmarshal(testdataOut)
+	require.NoError(t, err)
+	require.Equal(t, []any{1, 1, nil, "123"}, resp) // Check that the custom error is returned
 
 	// Call a method with parameters exceeding the limit
-	res, reqErr, err := conn.SendRequest(t.Context(), "test", "123456789") // This message should exceed the limit
+	res, reqErr, err := conn.SendRequest(t.Context(), "test", msgpack.NewString("123456789")) // This message should exceed the limit
 	require.Nil(t, res)
 	require.Nil(t, reqErr)
 	require.ErrorIs(t, err, &ErrBufferLimitExceeded{})
 
 	// Send a notification with parameters exceeding the limit
-	err = conn.SendNotification("test", "hi") // This message should pass
+	err = conn.SendNotification("test", msgpack.NewString("hi")) // This message should pass
 	require.NoError(t, err)
-	err = conn.SendNotification("test", "123456789") // This message should exceed the limit
+	err = conn.SendNotification("test", msgpack.NewString("123456789")) // This message should exceed the limit
 	require.ErrorIs(t, err, &ErrBufferLimitExceeded{})
 	time.Sleep(500 * time.Millisecond)
 }
@@ -224,18 +217,14 @@ func TestFixIntHandling(t *testing.T) {
 		expectReadHex(t, testdataOut, "9302a162910a") // [2, "b", [10]]
 	}
 }
+
 func TestRPCConnectionRecover(t *testing.T) {
 	in, testdataIn := nio.Pipe(buffer.New(1024))
 	testdataOut, out := nio.Pipe(buffer.New(1024))
 
-	enc := msgpack.NewEncoder(testdataIn)
-	enc.UseCompactInts(true)
 	send := func(msg ...any) {
-		require.NoError(t, enc.Encode(msg))
+		require.NoError(t, msgpack.Encode(msg, testdataIn))
 	}
-
-	d := msgpack.NewDecoder(testdataOut)
-	d.UseLooseInterfaceDecoding(true)
 
 	conn := NewConnection(
 		in, out,
@@ -258,29 +247,29 @@ func TestRPCConnectionRecover(t *testing.T) {
 
 	// Send a valid request and check the response
 	send(messageTypeRequest, MessageID(1), "test", []any{})
-	var resp any
-	require.NoError(t, d.Decode(&resp))
-	require.Equal(t, []any{int64(1), int64(1), nil, "123"}, resp)
+	resp, err := msgpack.Unmarshal(testdataOut)
+	require.NoError(t, err)
+	require.Equal(t, []any{1, 1, nil, "123"}, resp)
 
 	// Send an invalid message to trigger an error
 	send(1, 2, 3) // Invalid message format
 
 	// Send another valid request and check the response
 	send(messageTypeRequest, MessageID(2), "test", []any{})
-	var resp2 any
-	require.NoError(t, d.Decode(&resp2))
-	require.Equal(t, []any{int64(1), int64(2), nil, "123"}, resp2)
+	resp2, err := msgpack.Unmarshal(testdataOut)
+	require.NoError(t, err)
+	require.Equal(t, []any{1, 2, nil, "123"}, resp2)
 
 	// Send a truncated message followed by a sequence to drain the incomplete message
 	call := []byte{0x94, 0x00, 0x03, 0xA4, 0x74, 0x65, 0x73, 0x74, 0x90} // Encoding of [0, 3, "test", []]
-	_, err := testdataIn.Write(call[:5])                                 // Send incomplete RPC message
+	_, err = testdataIn.Write(call[:5])                                  // Send incomplete RPC message
 	require.NoError(t, err)
 	_, err = testdataIn.Write([]byte{0xC0, 0xC0, 0xC0, 0xC0, 0xC0, 0xC0}) // Send a sequence of NIL to drain the incomplete message
 	require.NoError(t, err)
 
 	// Send another valid request and check the response
 	send(messageTypeRequest, MessageID(3), "test", []any{})
-	var resp3 any
-	require.NoError(t, d.Decode(&resp3))
-	require.Equal(t, []any{int64(1), int64(3), nil, "123"}, resp3)
+	resp3, err := msgpack.Unmarshal(testdataOut)
+	require.NoError(t, err)
+	require.Equal(t, []any{1, 3, nil, "123"}, resp3)
 }
