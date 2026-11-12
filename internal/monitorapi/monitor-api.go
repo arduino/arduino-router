@@ -17,6 +17,7 @@ import (
 	"github.com/djherbis/nio/v3"
 
 	"github.com/arduino/arduino-router/internal/msgpackrouter"
+	"github.com/arduino/arduino-router/msgpack"
 	"github.com/arduino/arduino-router/msgpackrpc"
 )
 
@@ -93,7 +94,7 @@ func read(rpc *msgpackrpc.Connection, params []any, res msgpackrouter.RouterResp
 		res(nil, []any{1, "Invalid number of parameters, expected max bytes to read"})
 		return
 	}
-	maxBytes, ok := msgpackrpc.ToUint(params[0])
+	maxBytes, ok := msgpack.ToUint(params[0])
 	if !ok {
 		res(nil, []any{1, "Invalid parameter type, expected positive int for max bytes to read"})
 		return

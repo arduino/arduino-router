@@ -156,7 +156,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 				// Fix the buffer size for the connection, if a bigger message is received, it will be rejected
 				if len(params.Get()) != 1 {
 					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: only one param is expected, got %d", len(params.Get()))))
-				} else if maxBuffSize, ok := msgpackrpc.ToInt(params.Get()[0]); !ok {
+				} else if maxBuffSize, ok := msgpack.ToInt(params.Get()[0]); !ok {
 					fwdRes(nil, routerError(ErrCodeInvalidParams, fmt.Sprintf("invalid params: expected int, got %T", params.Get()[0])))
 				} else if maxBuffSize <= 127 {
 					fwdRes(nil, routerError(ErrCodeInvalidParams, "invalid params: max buffer size must be greater than 127"))
@@ -209,7 +209,7 @@ func (r *Router) connectionLoop(conn io.ReadWriteCloser) {
 				// Fix the buffer size for the connection, if a bigger message is received, it will be rejected
 				if len(params.Get()) != 1 {
 					slog.Error(fmt.Sprintf("invalid params: only one param is expected, got %d", len(params.Get())))
-				} else if maxBuffSize, ok := msgpackrpc.ToInt(params.Get()[0]); !ok {
+				} else if maxBuffSize, ok := msgpack.ToInt(params.Get()[0]); !ok {
 					slog.Error(fmt.Sprintf("invalid params: expected int, got %T", params.Get()[0]))
 				} else if maxBuffSize <= 127 {
 					slog.Error("invalid params: max buffer size must be greater than 127")
