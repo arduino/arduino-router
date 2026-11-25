@@ -8,6 +8,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -66,6 +67,9 @@ func main() {
 			rpcResp, rpcErr, err := send(ctx, server, method, args.([]any), notification)
 			if err != nil {
 				fmt.Println("Error sending request:", err)
+				if hint := permissionHint(server, err); hint != "" {
+					fmt.Println(hint)
+				}
 				os.Exit(1)
 			}
 
@@ -223,6 +227,14 @@ func send(ctx context.Context, server string, method string, args []any, notific
 		return nil, nil, fmt.Errorf("error sending request: %w", err)
 	}
 	return reqResult, reqError, nil
+}
+
+func permissionHint(server string, err error) string {
+	if strings.Contains(server, ":") || !errors.Is(err, os.ErrPermission) {
+		return ""
+	}
+
+	return "Permission denied accessing the router socket. Add your user to the arduino-router group, for example: sudo usermod -aG arduino-router \"$USER\". Then log out and back in for the group change to take effect."
 }
 
 func print(v any) {
