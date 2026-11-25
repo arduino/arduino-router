@@ -141,7 +141,6 @@ func composeArgs(args []string) (any, []string, error) {
 		if err != nil {
 			return nil, args, fmt.Errorf("invalid f64 value: %s", args[0])
 		}
-		return nil, args, fmt.Errorf("invalid f64 value: %s", args[0])
 		return f, args[1:], nil
 	}
 	if str, ok := strings.CutPrefix(args[0], "str:"); ok {
